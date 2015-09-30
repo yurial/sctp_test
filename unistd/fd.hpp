@@ -2,6 +2,7 @@
 #define UNISTD_FD_HPP
 
 #include <new>
+#include <utility>
 
 namespace unistd
 {

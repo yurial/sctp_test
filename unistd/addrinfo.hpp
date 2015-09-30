@@ -2,6 +2,7 @@
 #define EXT_ADDRINFO_HPP
 
 #include <netdb.h>
+#include <string.h>
 #include <string>
 
 namespace unistd
