@@ -17,6 +17,8 @@ all: $(ALL)
 clean:
 	rm -f $(ALL)
 
-server: server.cpp
+EXT_SRC=ext/mkstr.cpp ext/escape.cpp
+UNISTD_SRC=unistd/addrinfo.cpp unistd/netdb.cpp unistd/time.cpp unistd/unistd.cpp ${EXT_SRC}
+server: server.cpp ${UNISTD_SRC}
 client: client.cpp
 
