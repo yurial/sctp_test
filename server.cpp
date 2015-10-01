@@ -3,8 +3,30 @@
 #include <arpa/inet.h>
 #include <netinet/sctp.h>
 
+#include <iostream>
+
+#include <ext/strenum.hpp>
 #include <unistd/fd.hpp>
 #include <unistd/netdb.hpp>
+
+#if 0
+    { SCTP_ADDR_AVAILABLE, "SCTP_ADDR_AVAILABLE" },
+    { SCTP_ADDR_UNREACHABLE, "SCTP_ADDR_UNREACHABLE" },
+    { SCTP_ADDR_REMOVED, "SCTP_ADDR_REMOVED" },
+    { SCTP_ADDR_ADDED, "SCTP_ADDR_ADDED" },
+    { SCTP_ADDR_MADE_PRIM, "SCTP_ADDR_MADE_PRIM" },
+    { SCTP_ADDR_CONFIRMED, "SCTP_ADDR_CONFIRMED" }
+#endif
+ext::strenum<sctp_sac_state>::pair sctp_sac_state_str[] =
+    {
+    { SCTP_COMM_UP, "SCTP_COMM_UP" },
+    { SCTP_COMM_LOST, "SCTP_COMM_LOST" },
+    { SCTP_RESTART, "SCTP_RESTART" },
+    { SCTP_SHUTDOWN_COMP, "SCTP_SHUTDOWN_COMP" },
+    { SCTP_CANT_STR_ASSOC, "SCTP_CANT_STR_ASSOC" }
+    };
+STRENUM_INIT_VALUES( sctp_sac_state, sctp_sac_state_str, static_cast<sctp_sac_state>( -1 ) )
+STRENUM_CONVERT_TO( sctp_sac_state )
 
 void subscribe_events(int fd)
 {
@@ -30,7 +52,7 @@ switch ( notify.sn_header.sn_type )
     case SCTP_ASSOC_CHANGE:
         {
         const auto& sac = notify.sn_assoc_change;
-        printf( "^^^ assoc_change: state=%hu, error=%hu, instr=%hu outstr=%hu\n", sac.sac_state, sac.sac_error, sac.sac_inbound_streams, sac.sac_outbound_streams );
+std::cout << "^^^ assoc_change: state=" << ext::convert_to<std::string>( static_cast<sctp_sac_state>( sac.sac_state ) ) << " assoc_id=" << sac.sac_assoc_id << " error=" << sac.sac_error << " in=" << sac.sac_inbound_streams << " out=" << sac.sac_outbound_streams << std::endl;
         break;
         }
     case SCTP_SEND_FAILED:
@@ -65,7 +87,7 @@ switch ( notify.sn_header.sn_type )
         }
     case SCTP_SHUTDOWN_EVENT:
         {
-        printf( "^^^ shutdown event\n" );
+        printf( "^^^ SCTP_SHUTDOWN_EVENT\n" );
         break;
         }
     default:
