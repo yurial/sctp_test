@@ -1,5 +1,5 @@
 INCLUDE+=-I.
-WARN_CPPFLAGS=-Werror -Wall -Wextra -Wold-style-cast -Wsign-promo -Wfloat-equal -Wshadow -Wcast-qual -Wzero-as-null-pointer-constant -Wno-non-virtual-dtor -Wstack-usage=8192 -fmax-errors=10 -std=c++11 -pedantic -Wno-unused-but-set-variable
+WARN_CPPFLAGS=-Werror -Wall -Wextra -Wold-style-cast -Wsign-promo -Wfloat-equal -Wshadow -Wcast-qual -Wzero-as-null-pointer-constant -Wno-non-virtual-dtor -Wstack-usage=8192 -fmax-errors=10 -std=c++11 -pedantic -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable
 #-Wconversion 
 COMMON_CPPFLAGS?=$(WARN_CPPFLAGS) -DHAVE_SYSLOG_H -D_LARGEFILE64_SOURCE
 ifdef DEBUG

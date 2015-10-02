@@ -76,7 +76,7 @@ std::cout << "^^^ assoc_change: state=" << ext::convert_to<std::string>( static_
             const auto sin6 = reinterpret_cast<const struct sockaddr_in6*>( &spc.spc_aaddr );
             ap = inet_ntop(AF_INET6, &sin6->sin6_addr, addrbuf, INET6_ADDRSTRLEN);
             }
-        printf( "^^^ intf_change: %s state=%d, error=%d\n", ap, spc.spc_state, spc.spc_error );
+        printf( "^^^ addr_change: %s state=%d, error=%d\n", ap, spc.spc_state, spc.spc_error );
         break;
         }
     case SCTP_REMOTE_ERROR:
@@ -97,6 +97,36 @@ std::cout << "^^^ assoc_change: state=" << ext::convert_to<std::string>( static_
         break;
         }
     };
+}
+
+void dump_packet(const msghdr& hdr, ssize_t nrecv)
+{
+raise( SIGTRAP );
+for (cmsghdr* cmsg = CMSG_FIRSTHDR( &hdr ); cmsg != nullptr; cmsg = CMSG_NXTHDR( const_cast<msghdr*>( &hdr ), cmsg ))
+    {
+    if ( cmsg->cmsg_level == IPPROTO_SCTP )
+        {
+        switch ( cmsg->cmsg_type )
+            {
+            case SCTP_INIT:
+                {
+                const sctp_initmsg* cdata = reinterpret_cast<const sctp_initmsg*>( CMSG_DATA( cmsg ) );
+                break;
+                }
+            case SCTP_SNDRCV:
+                {
+                const sctp_sndrcvinfo* cdata = reinterpret_cast<const sctp_sndrcvinfo*>( CMSG_DATA( cmsg ) );
+                break;
+                }
+            default:
+                raise( SIGTRAP );
+            } //switch
+        } //if
+    } //for
+if ( hdr.msg_flags & MSG_NOTIFICATION )
+    notification_handle( *reinterpret_cast<sctp_notification*>( hdr.msg_iov[0].iov_base ) );
+else
+    std::cout.write( reinterpret_cast<char*>( hdr.msg_iov[0].iov_base ), nrecv ) << std::endl;
 }
 
 int main()
@@ -137,21 +167,9 @@ for (;;)
         raise( SIGTRAP );
     if ( -1 == nrecv )
         raise( SIGTRAP );
-
-    if ( hdr.msg_flags & MSG_NOTIFICATION )
-        notification_handle( *reinterpret_cast<sctp_notification*>( msg_buff.data() ) );
-    else
-        raise( SIGTRAP );
+//    dump_packet( hdr, nrecv );
     }
 #if 0
-for (cmsgptr = CMSG_FIRSTHDR(&msg); cmsgptr != NULL;
-    cmsgptr = CMSG_NXTHDR(&msg, cmsgptr)) {
-    if (cmsgptr->cmsg_level == ... && cmsgptr->cmsg_type == ... ) {
-       u_char  *ptr;
-
-       ptr = CMSG_DATA(cmsgptr);
-       /* process data pointed to by ptr */
-    }
 sendmsg
 #endif
 //raise( SIGTRAP );
