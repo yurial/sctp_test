@@ -1,6 +1,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <sys/epoll.h>
+#include <sys/timerfd.h>
 #include <arpa/inet.h>
 #include <netinet/sctp.h>
 
@@ -28,6 +29,8 @@ ext::strenum<sctp_sac_state>::pair sctp_sac_state_str[] =
     };
 STRENUM_INIT_VALUES( sctp_sac_state, sctp_sac_state_str, static_cast<sctp_sac_state>( -1 ) )
 STRENUM_CONVERT_TO( sctp_sac_state )
+
+uint64_t counter_recv_requests = 0;
 
 void subscribe_events(int fd)
 {
@@ -100,9 +103,8 @@ std::cout << "^^^ assoc_change: state=" << ext::convert_to<std::string>( static_
     };
 }
 
-void dump_packet(const msghdr& hdr, ssize_t nrecv)
+void process_packet(const msghdr& hdr, ssize_t nrecv)
 {
-static uint64_t packet_counter = 0;
 for (cmsghdr* cmsg = CMSG_FIRSTHDR( &hdr ); cmsg != nullptr; cmsg = CMSG_NXTHDR( const_cast<msghdr*>( &hdr ), cmsg ))
     {
     if ( cmsg->cmsg_level == IPPROTO_SCTP )
@@ -127,7 +129,7 @@ for (cmsghdr* cmsg = CMSG_FIRSTHDR( &hdr ); cmsg != nullptr; cmsg = CMSG_NXTHDR(
 if ( hdr.msg_flags & MSG_NOTIFICATION )
     notification_handle( *reinterpret_cast<sctp_notification*>( hdr.msg_iov[0].iov_base ) );
 else
-    ++packet_counter;
+    ++counter_recv_requests;
 }
 
 void recv_packets(int sock, int events)
@@ -156,12 +158,12 @@ if ( 0 == nrecv )
     raise( SIGTRAP );
 if ( -1 == nrecv )
     raise( SIGTRAP );
-dump_packet( hdr, nrecv );
+process_packet( hdr, nrecv );
 }
 
-void show_stat(int sock, int events)
+void show_stat()
 {
-
+fprintf( stdout, "requests: %lu\n", counter_recv_requests );
 }
 
 int main()
@@ -177,10 +179,21 @@ unistd::listen( sock, 128 );
 subscribe_events( sock );
 
 unistd::fd efd = std::move( epoll_create1( 0 ) );
-epoll_event event;
-event.events = EPOLLIN | EPOLLOUT;
-event.data.fd = static_cast<int>( sock );
-epoll_ctl( efd, EPOLL_CTL_ADD, sock, &event );
+    {
+    epoll_event event;
+    event.events = EPOLLIN; // | EPOLLOUT;
+    event.data.fd = static_cast<int>( sock );
+    epoll_ctl( efd, EPOLL_CTL_ADD, sock, &event );
+    }
+unistd::fd timerfd = std::move( timerfd_create( CLOCK_MONOTONIC, TFD_NONBLOCK ) );
+itimerspec timeout{ { 1, 0 }, { 1, 0 } };
+timerfd_settime( timerfd, 0, &timeout, nullptr );
+    {
+    epoll_event event;
+    event.events = EPOLLIN;
+    event.data.fd = static_cast<int>( timerfd );
+    epoll_ctl( efd, EPOLL_CTL_ADD, timerfd, &event );
+    }
 
 for (;;)
     {
@@ -190,6 +203,12 @@ for (;;)
         {
         if ( events[ i ].data.fd == sock )
             recv_packets( sock, events[ i ].events );
+        else if ( events[ i ].data.fd == timerfd )
+            {
+            uint64_t x;
+            unistd::read_all( timerfd, &x, sizeof(x) );
+            show_stat();
+            }
         else
             raise( SIGTRAP );
         }
