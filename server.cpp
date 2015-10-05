@@ -1,6 +1,5 @@
 #include <signal.h>
 #include <stdlib.h>
-#include <sys/epoll.h>
 #include <sys/timerfd.h>
 #include <arpa/inet.h>
 #include <netinet/sctp.h>
@@ -10,6 +9,7 @@
 #include <ext/strenum.hpp>
 #include <unistd/fd.hpp>
 #include <unistd/netdb.hpp>
+#include <unistd/epoll.hpp>
 
 #if 0
     { SCTP_ADDR_AVAILABLE, "SCTP_ADDR_AVAILABLE" },
@@ -178,32 +178,21 @@ unistd::bind( sock, addr );
 unistd::listen( sock, 128 );
 subscribe_events( sock );
 
-unistd::fd efd = std::move( epoll_create1( 0 ) );
-    {
-    epoll_event event;
-    event.events = EPOLLIN; // | EPOLLOUT;
-    event.data.fd = static_cast<int>( sock );
-    epoll_ctl( efd, EPOLL_CTL_ADD, sock, &event );
-    }
 unistd::fd timerfd = std::move( timerfd_create( CLOCK_MONOTONIC, TFD_NONBLOCK ) );
 itimerspec timeout{ { 1, 0 }, { 1, 0 } };
 timerfd_settime( timerfd, 0, &timeout, nullptr );
-    {
-    epoll_event event;
-    event.events = EPOLLIN;
-    event.data.fd = static_cast<int>( timerfd );
-    epoll_ctl( efd, EPOLL_CTL_ADD, timerfd, &event );
-    }
+unistd::fd efd = std::move( unistd::epoll_create() );
+unistd::epoll_add( efd, sock, EPOLLIN, static_cast<int>( sock ) );
+unistd::epoll_add( efd, timerfd, EPOLLIN, static_cast<int>( timerfd ) );
 
 for (;;)
     {
-    std::vector<epoll_event> events( 4 ); //TODO: define
-    int nready = epoll_wait( efd, events.data(), events.size(), -1 );
-    for (int i = 0; i < nready; ++i)
+    const std::vector<epoll_event> events = unistd::epoll_wait( efd, 4/*maxevents*/, -1/*timeout*/ );
+    for (const auto& event : events)
         {
-        if ( events[ i ].data.fd == sock )
-            recv_packets( sock, events[ i ].events );
-        else if ( events[ i ].data.fd == timerfd )
+        if ( event.data.fd == sock )
+            recv_packets( sock, event.events );
+        else if ( event.data.fd == timerfd )
             {
             uint64_t x;
             unistd::read_all( timerfd, &x, sizeof(x) );
