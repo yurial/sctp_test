@@ -1,5 +1,6 @@
 #include <signal.h>
 #include <stdlib.h>
+#include <sys/epoll.h>
 #include <arpa/inet.h>
 #include <netinet/sctp.h>
 
@@ -19,11 +20,11 @@
 #endif
 ext::strenum<sctp_sac_state>::pair sctp_sac_state_str[] =
     {
-    { SCTP_COMM_UP, "SCTP_COMM_UP" },
-    { SCTP_COMM_LOST, "SCTP_COMM_LOST" },
-    { SCTP_RESTART, "SCTP_RESTART" },
-    { SCTP_SHUTDOWN_COMP, "SCTP_SHUTDOWN_COMP" },
-    { SCTP_CANT_STR_ASSOC, "SCTP_CANT_STR_ASSOC" }
+    { SCTP_COMM_UP,         "SCTP_COMM_UP"          },
+    { SCTP_COMM_LOST,       "SCTP_COMM_LOST"        },
+    { SCTP_RESTART,         "SCTP_RESTART"          },
+    { SCTP_SHUTDOWN_COMP,   "SCTP_SHUTDOWN_COMP"    },
+    { SCTP_CANT_STR_ASSOC,  "SCTP_CANT_STR_ASSOC"   }
     };
 STRENUM_INIT_VALUES( sctp_sac_state, sctp_sac_state_str, static_cast<sctp_sac_state>( -1 ) )
 STRENUM_CONVERT_TO( sctp_sac_state )
@@ -101,7 +102,7 @@ std::cout << "^^^ assoc_change: state=" << ext::convert_to<std::string>( static_
 
 void dump_packet(const msghdr& hdr, ssize_t nrecv)
 {
-raise( SIGTRAP );
+static uint64_t packet_counter = 0;
 for (cmsghdr* cmsg = CMSG_FIRSTHDR( &hdr ); cmsg != nullptr; cmsg = CMSG_NXTHDR( const_cast<msghdr*>( &hdr ), cmsg ))
     {
     if ( cmsg->cmsg_level == IPPROTO_SCTP )
@@ -126,7 +127,41 @@ for (cmsghdr* cmsg = CMSG_FIRSTHDR( &hdr ); cmsg != nullptr; cmsg = CMSG_NXTHDR(
 if ( hdr.msg_flags & MSG_NOTIFICATION )
     notification_handle( *reinterpret_cast<sctp_notification*>( hdr.msg_iov[0].iov_base ) );
 else
-    std::cout.write( reinterpret_cast<char*>( hdr.msg_iov[0].iov_base ), nrecv ) << std::endl;
+    ++packet_counter;
+}
+
+void recv_packets(int sock, int events)
+{
+std::vector<char> cmsg_buff( CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ) );
+std::vector<char> msg_buff( 8192 ); //TODO:
+
+struct iovec iov;
+memset( &iov, 0, sizeof(iov) );
+iov.iov_base = msg_buff.data();
+iov.iov_len = msg_buff.size();
+
+struct msghdr hdr;
+memset( &hdr, 0, sizeof(hdr) );
+hdr.msg_name = nullptr;
+hdr.msg_namelen = 0;
+hdr.msg_iov = &iov;
+hdr.msg_iovlen = 1;
+hdr.msg_control = cmsg_buff.data();
+hdr.msg_controllen = cmsg_buff.size();
+hdr.msg_flags = 0;
+
+ssize_t nrecv = 0;
+TEMP_FAILURE_RETRY( nrecv = recvmsg( sock, &hdr, 0 ) );
+if ( 0 == nrecv )
+    raise( SIGTRAP );
+if ( -1 == nrecv )
+    raise( SIGTRAP );
+dump_packet( hdr, nrecv );
+}
+
+void show_stat(int sock, int events)
+{
+
 }
 
 int main()
@@ -141,34 +176,25 @@ unistd::bind( sock, addr );
 unistd::listen( sock, 128 );
 subscribe_events( sock );
 
+unistd::fd efd = std::move( epoll_create1( 0 ) );
+epoll_event event;
+event.events = EPOLLIN | EPOLLOUT;
+event.data.fd = static_cast<int>( sock );
+epoll_ctl( efd, EPOLL_CTL_ADD, sock, &event );
+
 for (;;)
     {
-    std::vector<char> cmsg_buff( sizeof(struct cmsghdr) + sizeof(struct sctp_sndrcvinfo) );
-    std::vector<char> msg_buff( 8192 ); //TODO:
-
-    struct iovec iov;
-    memset( &iov, 0, sizeof(iov) );
-    iov.iov_base = msg_buff.data();
-    iov.iov_len = msg_buff.size();
-
-    struct msghdr hdr;
-    memset( &hdr, 0, sizeof(hdr) );
-    hdr.msg_name = nullptr;
-    hdr.msg_namelen = 0;
-    hdr.msg_iov = &iov;
-    hdr.msg_iovlen = 1;
-    hdr.msg_control = cmsg_buff.data();
-    hdr.msg_controllen = cmsg_buff.size();
-    hdr.msg_flags = 0;
-
-    ssize_t nrecv = 0;
-    TEMP_FAILURE_RETRY( nrecv = recvmsg( sock, &hdr, 0 ) );
-    if ( 0 == nrecv )
-        raise( SIGTRAP );
-    if ( -1 == nrecv )
-        raise( SIGTRAP );
-//    dump_packet( hdr, nrecv );
+    std::vector<epoll_event> events( 4 ); //TODO: define
+    int nready = epoll_wait( efd, events.data(), events.size(), -1 );
+    for (int i = 0; i < nready; ++i)
+        {
+        if ( events[ i ].data.fd == sock )
+            recv_packets( sock, events[ i ].events );
+        else
+            raise( SIGTRAP );
+        }
     }
+
 #if 0
 sendmsg
 #endif

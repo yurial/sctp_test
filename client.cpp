@@ -47,7 +47,7 @@ cmsg->cmsg_len = CMSG_LEN( sizeof( sctp_sndrcvinfo ) );
 sctp_sndrcvinfo& cmsg_data = *reinterpret_cast<sctp_sndrcvinfo*>( CMSG_DATA( cmsg ) );
 cmsg_data.sinfo_stream = 0;
 cmsg_data.sinfo_ssn = 0; //ignored
-cmsg_data.sinfo_flags = 0; //SCTP_UNORDERED;
+cmsg_data.sinfo_flags = SCTP_UNORDERED;
 cmsg_data.sinfo_ppid = 31337;
 cmsg_data.sinfo_context = 123456;
 cmsg_data.sinfo_timetolive = 0;
@@ -77,7 +77,7 @@ events.sctp_partial_delivery_event = 0;
 events.sctp_adaptation_layer_event = 0;
 events.sctp_authentication_event = 0;
 
-unistd::setsockopt( fd, IPPROTO_SCTP, SCTP_EVENTS, &events, sizeof(events) );
+unistd::setsockopt( fd, SOL_SCTP, SCTP_EVENTS, &events, sizeof(events) );
 }
 
 int main()
@@ -90,8 +90,8 @@ unistd::fd sock = unistd::socket( addr );
 subscribe_events( sock );
 
     {
-    int val = 0;
-    unistd::setsockopt( sock, IPPROTO_SCTP, SCTP_NODELAY, &val, sizeof(val) );
+    //int val = 0;
+    //unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, &val, sizeof(val) );
     }
 
 unistd::connect( sock, addr );
@@ -99,7 +99,7 @@ unistd::connect( sock, addr );
 sctp_assoc_t assoc_id = 0;
 while ( assoc_id == 0 )
     {
-    std::vector<char> cmsg_buff( sizeof(struct cmsghdr) + sizeof(struct sctp_sndrcvinfo) );
+    std::vector<char> cmsg_buff( CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ) );
     std::vector<char> msg_buff( 8192 ); //TODO:
 
     struct iovec iov;
@@ -150,8 +150,8 @@ while ( assoc_id == 0 )
         }
     }
 
-int flags = fcntl( sock, F_GETFL, 0 );
-fcntl( sock, F_SETFL, flags | O_NONBLOCK );
+//int flags = fcntl( sock, F_GETFL, 0 );
+//fcntl( sock, F_SETFL, flags | O_NONBLOCK );
 
 const std::vector<char> packet_x( { 'p', 'a', 'c', 'k', 'e', 't', '_', 'x' } );
 for (;;)
