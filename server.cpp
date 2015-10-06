@@ -226,6 +226,7 @@ else
     ++counter_recv_requests;
 }
 
+#if 0
 void recv_packets(int sock, int events)
 {
 std::vector<char> cmsg_buff( CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ) );
@@ -253,6 +254,38 @@ if ( 0 == nrecv )
 if ( -1 == nrecv )
     raise( SIGTRAP );
 process_packet( hdr, nrecv );
+}
+#endif
+
+void recv_packets(int sock, int events)
+{
+int n = 1024;
+mmsghdr zero_hdr{ { nullptr, 0, nullptr, 0, nullptr, 0, 0 }, 0 };
+
+std::vector<char> cmsg_buff( n * CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ) );
+std::vector<char> msg_buff( n * 8192 ); //TODO: buff size
+std::vector<iovec> iovs( n );
+std::vector<mmsghdr> mhdrs( n, zero_hdr );
+
+for (int i = 0; i < n; ++i)
+    {
+    iovs[ i ].iov_base = msg_buff.data() + (i*8192);
+    iovs[ i ].iov_len = 8192;
+    auto& hdr = mhdrs[ i ].msg_hdr;
+    hdr.msg_iov = &iovs[ i ];
+    hdr.msg_iovlen = 1;
+    hdr.msg_control = cmsg_buff.data() + (i*CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ) );
+    hdr.msg_controllen = CMSG_SPACE( sizeof( sctp_sndrcvinfo ) );
+    hdr.msg_flags = 0;
+    }
+//struct timespec timeout{ 0, 0 };
+int nrecv = recvmmsg( sock, mhdrs.data(), mhdrs.size(), 0 /*MSG_WAITFORONE*/, nullptr );
+
+for (int i = 0; i < nrecv; ++i)
+    {
+    auto& hdr = mhdrs[ i ].msg_hdr;
+    process_packet( hdr, mhdrs[ i ].msg_len );
+    }
 }
 
 void show_stat()
