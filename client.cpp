@@ -26,7 +26,8 @@ struct opt
         {
         help = 'h',
         nodelay = 127,
-        sndbuf
+        sndbuf,
+        rcvbuf
         };
     };
 
@@ -34,7 +35,8 @@ static const option long_options[] =
     {
     { "help",       no_argument,        nullptr, opt::help      },
     { "nodelay",    no_argument,        nullptr, opt::nodelay   },
-    { "sndbuf",     required_argument,  nullptr, opt::sndbuf    }
+    { "sndbuf",     required_argument,  nullptr, opt::sndbuf    },
+    { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    }
     };
 
 struct params
@@ -43,6 +45,7 @@ struct params
     std::string hostname = "localhost";
     std::string port = "31337";
     size_t      sndbuf = 0;
+    size_t      rcvbuf = 0;
     };
 
 params get_params(int argc, char* argv[])
@@ -66,6 +69,9 @@ params get_params(int argc, char* argv[])
                 break;
             case opt::sndbuf:
                 p.sndbuf = ext::convert_to<bytes,std::string>( optarg );
+                break;
+            case opt::rcvbuf:
+                p.rcvbuf = ext::convert_to<bytes,std::string>( optarg );
                 break;
 #if 0
             case opt_file_limit:
@@ -180,6 +186,9 @@ if ( p.nodelay )
 
 if ( 0 != p.sndbuf )
     unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, p.sndbuf );
+
+if ( 0 != p.rcvbuf )
+    unistd::setsockopt( sock, SOL_SOCKET, SO_RCVBUF, p.rcvbuf );
 
 sctp_initmsg init_params;
 memset( &init_params, 0, sizeof(init_params) );
