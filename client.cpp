@@ -1,5 +1,6 @@
 #include <signal.h>
 #include <stdlib.h>
+#include <getopt.h>
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <netinet/sctp.h>
@@ -8,6 +9,86 @@
 
 #include <unistd/fd.hpp>
 #include <unistd/netdb.hpp>
+
+int help(FILE* os, int argc, char* argv[])
+    {
+    fprintf( os, "usage: %s -h\n", argv[0] );
+    fprintf( os, "  --nodelay   disable Nagle algorithm\n");
+    return EXIT_SUCCESS;
+    }
+
+const char short_options[] = "h";
+
+struct opt
+    {
+    enum enum_t
+        {
+        help = 'h',
+        nodelay = 127
+        };
+    };
+
+static const option long_options[] =
+    {
+    { "help",       no_argument,        nullptr, opt::help      },
+    { "nodelay",    no_argument,        nullptr, opt::nodelay   }
+    };
+
+struct params
+    {
+    bool    nodelay = false;
+    };
+
+params get_params(int argc, char* argv[])
+    {
+    params p;
+    optind = 1;
+    opterr = 0;
+    int option_index;
+    for (;;)
+        {
+        int option = getopt_long( argc, argv, short_options, long_options, &option_index );
+        if ( -1 == option )
+            break;
+        switch( option )
+            {
+            case opt::help:
+                help( stdout, argc, argv );
+                exit( EXIT_SUCCESS );
+            case opt::nodelay:
+                p.nodelay = true;
+                break;
+#if 0
+            case opt_file_limit:
+                p.file_limit = ext::convert_to<bytes,std::string>( optarg );
+                break;
+            case opt_page_size:
+                p.page_size = ext::convert_to<bytes,std::string>( optarg );
+                if ( p.page_size > std::numeric_limits<int32_t>::max() )
+                    {
+                    syslog( LOG_ERR ) << "page size is too big" << std::endl;
+                    exit( EXIT_FAILURE );
+                    }
+                break;
+#endif
+            case 0:
+                fprintf( stderr, "Invalid command-line option\n" );
+                help( stderr, argc, argv );
+                exit( EXIT_FAILURE );
+            }
+        }
+#if 0
+    if ( optind < argc )
+        p.fname = argv[ optind ];
+    else
+        {   
+        syslog( LOG_ERR ) << "<filename> not set" << std::endl;
+        help( stderr, argc, argv );
+        exit( EXIT_FAILURE );
+        }
+#endif
+    return p;
+    }
 
 std::string readln()
     {
@@ -80,19 +161,18 @@ events.sctp_authentication_event = 0;
 unistd::setsockopt( fd, SOL_SCTP, SCTP_EVENTS, &events, sizeof(events) );
 }
 
-int main()
+int main(int argc, char* argv[])
 {
 signal( SIGTRAP, SIG_IGN );
+params p = get_params( argc, argv );
 unistd::addrinfo hint = addrinfo{ 0, AF_INET6, SOCK_SEQPACKET, IPPROTO_SCTP, 0, nullptr, nullptr, nullptr };
 std::vector<unistd::addrinfo> addrs = unistd::getaddrinfo( "localhost", "31337", hint );
 const unistd::addrinfo& addr = addrs.at( 0 );
 unistd::fd sock = unistd::socket( addr );
 subscribe_events( sock );
 
-    {
-    //int val = 0;
-    //unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, &val, sizeof(val) );
-    }
+if ( p.nodelay )
+    unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
 
 unistd::connect( sock, addr );
 

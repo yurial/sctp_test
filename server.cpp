@@ -164,6 +164,7 @@ process_packet( hdr, nrecv );
 void show_stat()
 {
 fprintf( stdout, "requests: %lu\n", counter_recv_requests );
+counter_recv_requests = 0;
 }
 
 int main()
