@@ -1,11 +1,13 @@
+#include <sys/timerfd.h>
 #include <signal.h>
 #include <stdlib.h>
-#include <sys/timerfd.h>
+#include <getopt.h>
 #include <arpa/inet.h>
 #include <netinet/sctp.h>
 
 #include <iostream>
 
+#include <ext/convert.hpp>
 #include <ext/strenum.hpp>
 #include <unistd/fd.hpp>
 #include <unistd/netdb.hpp>
@@ -31,6 +33,95 @@ STRENUM_INIT_VALUES( sctp_sac_state, sctp_sac_state_str, static_cast<sctp_sac_st
 STRENUM_CONVERT_TO( sctp_sac_state )
 
 uint64_t counter_recv_requests = 0;
+
+int help(FILE* os, int argc, char* argv[])
+    {
+    fprintf( os, "usage: %s [hostname] [port]\n", argv[0] );
+    fprintf( os, "  --nodelay   disable Nagle algorithm\n" );
+    return EXIT_SUCCESS;
+    }
+
+const char short_options[] = "h";
+
+struct opt
+    {
+    enum enum_t
+        {
+        help = 'h',
+        nodelay = 127,
+        sndbuf,
+        rcvbuf
+        };
+    };
+
+static const option long_options[] =
+    {
+    { "help",       no_argument,        nullptr, opt::help      },
+    { "nodelay",    no_argument,        nullptr, opt::nodelay   },
+    { "sndbuf",     required_argument,  nullptr, opt::sndbuf    },
+    { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    }
+    };
+
+struct params
+    {
+    bool        nodelay = false;
+    std::string hostname = "localhost";
+    std::string port = "31337";
+    size_t      sndbuf = 0;
+    size_t      rcvbuf = 0;
+    };
+
+params get_params(int argc, char* argv[])
+    {
+    params p;
+    optind = 1;
+    opterr = 0;
+    int option_index;
+    for (;;)
+        {
+        int option = getopt_long( argc, argv, short_options, long_options, &option_index );
+        if ( -1 == option )
+            break;
+        switch( option )
+            {
+            case opt::help:
+                help( stdout, argc, argv );
+                exit( EXIT_SUCCESS );
+            case opt::nodelay:
+                p.nodelay = true;
+                break;
+            case opt::sndbuf:
+                p.sndbuf = ext::convert_to<bytes,std::string>( optarg );
+                break;
+            case opt::rcvbuf:
+                p.rcvbuf = ext::convert_to<bytes,std::string>( optarg );
+                break;
+#if 0
+            case opt_file_limit:
+                p.file_limit = ext::convert_to<bytes,std::string>( optarg );
+                break;
+            case opt_page_size:
+                p.page_size = ext::convert_to<bytes,std::string>( optarg );
+                if ( p.page_size > std::numeric_limits<int32_t>::max() )
+                    {
+                    syslog( LOG_ERR ) << "page size is too big" << std::endl;
+                    exit( EXIT_FAILURE );
+                    }
+                break;
+#endif
+            case 0:
+                fprintf( stderr, "Invalid command-line option\n" );
+                help( stderr, argc, argv );
+                exit( EXIT_FAILURE );
+            }
+        }
+    if ( optind < argc )
+        p.hostname = argv[ optind++ ];
+    if ( optind < argc )
+        p.port = argv[ optind ];
+
+    return p;
+    }
 
 void subscribe_events(int fd)
 {
@@ -167,13 +258,24 @@ fprintf( stdout, "requests: %lu\n", counter_recv_requests );
 counter_recv_requests = 0;
 }
 
-int main()
+int main(int argc, char* argv[])
 {
 signal( SIGTRAP, SIG_IGN );
+params p = get_params( argc, argv );
 unistd::addrinfo hint = addrinfo{ AI_PASSIVE, AF_INET6, SOCK_SEQPACKET, IPPROTO_SCTP, 0, nullptr, nullptr, nullptr };
-std::vector<unistd::addrinfo> addrs = unistd::getaddrinfo( "localhost", "31337", hint );
+std::vector<unistd::addrinfo> addrs = unistd::getaddrinfo( p.hostname, p.port, hint );
 const unistd::addrinfo& addr = addrs.at( 0 );
 unistd::fd sock = unistd::socket( addr );
+
+if ( p.nodelay )
+    unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
+
+if ( 0 != p.sndbuf )
+    unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, p.sndbuf );
+
+if ( 0 != p.rcvbuf )
+    unistd::setsockopt( sock, SOL_SOCKET, SO_RCVBUF, p.rcvbuf );
+
 //TODO: unistd::sctp::bindx
 unistd::bind( sock, addr );
 unistd::listen( sock, 128 );
