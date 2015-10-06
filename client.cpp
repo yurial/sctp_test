@@ -171,6 +171,24 @@ subscribe_events( sock );
 if ( p.nodelay )
     unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
 
+sctp_initmsg init_params;
+memset( &init_params, 0, sizeof(init_params) );
+init_params.sinit_num_ostreams = 1;
+init_params.sinit_max_instreams = 1;
+init_params.sinit_max_attempts = 3;
+init_params.sinit_max_init_timeo = 100;
+unistd::setsockopt( sock, SOL_SCTP, SCTP_INITMSG, init_params );
+
+#if 0
+sctp_assocparams assoc_params;
+assoc_params.sasoc_assoc_id
+assoc_params.sasoc_asocmaxrxt
+assoc_params.sasoc_number_peer_destinations
+assoc_params.sasoc_peer_rwnd
+assoc_params.sasoc_local_rwnd
+assoc_params.sasoc_cookie_life
+#endif
+
 unistd::connect( sock, addr );
 
 sctp_assoc_t assoc_id = 0;
