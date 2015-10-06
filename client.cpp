@@ -7,6 +7,7 @@
 
 #include <iostream>
 
+#include <ext/convert.hpp>
 #include <unistd/fd.hpp>
 #include <unistd/netdb.hpp>
 
@@ -24,14 +25,16 @@ struct opt
     enum enum_t
         {
         help = 'h',
-        nodelay = 127
+        nodelay = 127,
+        sndbuf
         };
     };
 
 static const option long_options[] =
     {
     { "help",       no_argument,        nullptr, opt::help      },
-    { "nodelay",    no_argument,        nullptr, opt::nodelay   }
+    { "nodelay",    no_argument,        nullptr, opt::nodelay   },
+    { "sndbuf",     required_argument,  nullptr, opt::sndbuf    }
     };
 
 struct params
@@ -39,6 +42,7 @@ struct params
     bool        nodelay = false;
     std::string hostname = "localhost";
     std::string port = "31337";
+    size_t      sndbuf = 0;
     };
 
 params get_params(int argc, char* argv[])
@@ -59,6 +63,9 @@ params get_params(int argc, char* argv[])
                 exit( EXIT_SUCCESS );
             case opt::nodelay:
                 p.nodelay = true;
+                break;
+            case opt::sndbuf:
+                p.sndbuf = ext::convert_to<bytes,std::string>( optarg );
                 break;
 #if 0
             case opt_file_limit:
@@ -170,6 +177,9 @@ subscribe_events( sock );
 
 if ( p.nodelay )
     unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
+
+if ( 0 != p.sndbuf )
+    unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, p.sndbuf );
 
 sctp_initmsg init_params;
 memset( &init_params, 0, sizeof(init_params) );
