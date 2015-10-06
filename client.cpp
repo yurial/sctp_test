@@ -12,7 +12,7 @@
 
 int help(FILE* os, int argc, char* argv[])
     {
-    fprintf( os, "usage: %s -h\n", argv[0] );
+    fprintf( os, "usage: %s -h [hostname] [port]\n", argv[0] );
     fprintf( os, "  --nodelay   disable Nagle algorithm\n");
     return EXIT_SUCCESS;
     }
@@ -36,7 +36,9 @@ static const option long_options[] =
 
 struct params
     {
-    bool    nodelay = false;
+    bool        nodelay = false;
+    std::string hostname = "localhost";
+    std::string port = "31337";
     };
 
 params get_params(int argc, char* argv[])
@@ -77,16 +79,11 @@ params get_params(int argc, char* argv[])
                 exit( EXIT_FAILURE );
             }
         }
-#if 0
     if ( optind < argc )
-        p.fname = argv[ optind ];
-    else
-        {   
-        syslog( LOG_ERR ) << "<filename> not set" << std::endl;
-        help( stderr, argc, argv );
-        exit( EXIT_FAILURE );
-        }
-#endif
+        p.hostname = argv[ optind++ ];
+    if ( optind < argc )
+        p.port = argv[ optind ];
+
     return p;
     }
 
@@ -166,7 +163,7 @@ int main(int argc, char* argv[])
 signal( SIGTRAP, SIG_IGN );
 params p = get_params( argc, argv );
 unistd::addrinfo hint = addrinfo{ 0, AF_INET6, SOCK_SEQPACKET, IPPROTO_SCTP, 0, nullptr, nullptr, nullptr };
-std::vector<unistd::addrinfo> addrs = unistd::getaddrinfo( "localhost", "31337", hint );
+std::vector<unistd::addrinfo> addrs = unistd::getaddrinfo( p.hostname, p.port, hint );
 const unistd::addrinfo& addr = addrs.at( 0 );
 unistd::fd sock = unistd::socket( addr );
 subscribe_events( sock );
