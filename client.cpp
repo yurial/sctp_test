@@ -14,7 +14,10 @@
 int help(FILE* os, int argc, char* argv[])
     {
     fprintf( os, "usage: %s -h [hostname] [port]\n", argv[0] );
-    fprintf( os, "  --nodelay   disable Nagle algorithm\n");
+    fprintf( os, "  --help          help :)\n" );
+    fprintf( os, "  --nodelay       disable Nagle algorithm\n" );
+    fprintf( os, "  --sndbuf[k|m|g] send buffer\n" );
+    fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
     return EXIT_SUCCESS;
     }
 
