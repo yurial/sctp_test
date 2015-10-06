@@ -180,6 +180,7 @@ init_params.sinit_max_init_timeo = 100;
 unistd::setsockopt( sock, SOL_SCTP, SCTP_INITMSG, init_params );
 
 #if 0
+unistd::setsockopt( sock, SOL_SCTP, SCTP_MAXBURST, 1024);
 sctp_assocparams assoc_params;
 assoc_params.sasoc_assoc_id
 assoc_params.sasoc_asocmaxrxt
