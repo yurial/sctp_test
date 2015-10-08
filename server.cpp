@@ -47,6 +47,7 @@ int help(FILE* os, int argc, char* argv[])
     fprintf( os, "  --nodelay       disable Nagle algorithm\n" );
     fprintf( os, "  --sndbuf[k|m|g] send buffer\n" );
     fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
+    fprintf( os, "  --loops         loops count per second, 0 = disable (default = 1000)\n");
     return EXIT_SUCCESS;
     }
 
@@ -59,7 +60,8 @@ struct opt
         help = 'h',
         nodelay = 127,
         sndbuf,
-        rcvbuf
+        rcvbuf,
+        loops
         };
     };
 
@@ -68,7 +70,9 @@ static const option long_options[] =
     { "help",       no_argument,        nullptr, opt::help      },
     { "nodelay",    no_argument,        nullptr, opt::nodelay   },
     { "sndbuf",     required_argument,  nullptr, opt::sndbuf    },
-    { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    }
+    { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    },
+    { "loops",      required_argument,  nullptr, opt::loops     },
+    { nullptr,      no_argument,        nullptr, 0              }
     };
 
 struct params
@@ -78,6 +82,7 @@ struct params
     std::string port = "31337";
     size_t      sndbuf = 0;
     size_t      rcvbuf = 0;
+    uint32_t    loops = 1000;
     };
 
 params get_params(int argc, char* argv[])
@@ -104,6 +109,9 @@ params get_params(int argc, char* argv[])
                 break;
             case opt::rcvbuf:
                 p.rcvbuf = ext::convert_to<bytes,std::string>( optarg );
+                break;
+            case opt::loops:
+                p.loops = ext::convert_to<decltype(p.loops)>( optarg );
                 break;
 #if 0
             case opt_file_limit:
@@ -273,7 +281,7 @@ if ( 0 != p.rcvbuf )
 if ( p.nodelay )
     unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
 
-struct sctp_sack_info sack_info{ 0, 1, 1 };
+struct sctp_sack_info sack_info{ 0, 1, 2 };
 unistd::setsockopt( sock, SOL_SCTP, SCTP_DELAYED_SACK, sack_info );
 
 //TODO: unistd::sctp::bindx
@@ -290,7 +298,7 @@ unistd::epoll_add( efd, timerfd, EPOLLIN, static_cast<int>( timerfd ) );
 
 receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), 1024 );
 
-const unistd::timespec loop_time( 0, 1000000L ); //1ms
+const unistd::timespec loop_time( 0, p.loops ? 1000000000L / p.loops : 0);
 const unistd::timespec minimal_sleep_time( 0, 1000L ); //1mcs
 
 for (;;)
