@@ -241,7 +241,13 @@ std::for_each( messages.begin(), messages.end(), process_message );
 
 void show_stat()
 {
-fprintf( stdout, "requests: %lu\n", counter_recv_requests );
+fprintf( stdout, "loops: %lu\n", counter_loops );
+fprintf( stdout, "msg per recv: %lu\n", counter_recv_messages / counter_loops );
+fprintf( stdout, "rps: %lu\n", counter_recv_requests );
+fprintf( stdout, "\n" );
+
+counter_loops = 0;
+counter_recv_messages = 0;
 counter_recv_requests = 0;
 }
 
