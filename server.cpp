@@ -263,14 +263,17 @@ unistd::fd sock = unistd::socket( addr );
 int flags = fcntl( sock, F_GETFL, 0 );
 fcntl( sock, F_SETFL, flags | O_NONBLOCK );
 
-if ( p.nodelay )
-    unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
-
 if ( 0 != p.sndbuf )
     unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, p.sndbuf );
 
 if ( 0 != p.rcvbuf )
     unistd::setsockopt( sock, SOL_SOCKET, SO_RCVBUF, p.rcvbuf );
+
+if ( p.nodelay )
+    unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
+
+struct sctp_sack_info sack_info{ 0, 1, 1 };
+unistd::setsockopt( sock, SOL_SCTP, SCTP_DELAYED_SACK, sack_info );
 
 //TODO: unistd::sctp::bindx
 unistd::bind( sock, addr );
