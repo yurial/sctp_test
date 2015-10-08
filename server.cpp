@@ -13,6 +13,7 @@
 #include <unistd/fd.hpp>
 #include <unistd/netdb.hpp>
 #include <unistd/epoll.hpp>
+#include <unistd/time.hpp>
 
 #include "receiver.hpp"
 
@@ -289,10 +290,14 @@ unistd::epoll_add( efd, timerfd, EPOLLIN, static_cast<int>( timerfd ) );
 
 receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), 1024 );
 
+const unistd::timespec loop_time( 0, 1000000L ); //1ms
+const unistd::timespec minimal_sleep_time( 0, 1000L ); //1mcs
+
 for (;;)
     {
     ++counter_loops;
     const std::vector<epoll_event> events = unistd::epoll_wait( efd, 4/*maxevents*/, -1/*timeout*/ );
+    const unistd::timespec start_time = unistd::clock_gettime( CLOCK_MONOTONIC );
     for (const auto& event : events)
         {
         if ( event.data.fd == sock )
@@ -313,6 +318,11 @@ for (;;)
         else
             raise( SIGTRAP );
         }
+    const unistd::timespec end_time = unistd::clock_gettime( CLOCK_MONOTONIC );
+    const unistd::timespec elapse_time = end_time - start_time;
+    const unistd::timespec sleep_time = loop_time - elapse_time;
+    if ( sleep_time > minimal_sleep_time )
+        unistd::nanosleep( sleep_time );
     }
 
 #if 0
