@@ -4,6 +4,7 @@
 #include <getopt.h>
 #include <arpa/inet.h>
 #include <netinet/sctp.h>
+#include <fcntl.h>
 
 #include <iostream>
 
@@ -250,6 +251,9 @@ unistd::addrinfo hint = addrinfo{ AI_PASSIVE, AF_INET6, SOCK_SEQPACKET, IPPROTO_
 std::vector<unistd::addrinfo> addrs = unistd::getaddrinfo( p.hostname, p.port, hint );
 const unistd::addrinfo& addr = addrs.at( 0 );
 unistd::fd sock = unistd::socket( addr );
+
+int flags = fcntl( sock, F_GETFL, 0 );
+fcntl( sock, F_SETFL, flags | O_NONBLOCK );
 
 if ( p.nodelay )
     unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
