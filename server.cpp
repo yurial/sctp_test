@@ -36,6 +36,8 @@ STRENUM_INIT_VALUES( sctp_sac_state, sctp_sac_state_str, static_cast<sctp_sac_st
 STRENUM_CONVERT_TO( sctp_sac_state )
 
 uint64_t counter_recv_requests = 0;
+uint64_t counter_recv_messages = 0;
+uint64_t counter_loops = 0;
 
 int help(FILE* os, int argc, char* argv[])
     {
@@ -200,10 +202,10 @@ std::cout << "^^^ assoc_change: state=" << ext::convert_to<std::string>( static_
     };
 }
 
-void process_packet(const mmsghdr& packet)
+void process_message(const mmsghdr& message)
 {
-const msghdr& hdr = packet.msg_hdr;
-size_t nrecv = packet.msg_len;
+const msghdr& hdr = message.msg_hdr;
+size_t nrecv = message.msg_len;
 
 for (cmsghdr* cmsg = CMSG_FIRSTHDR( &hdr ); cmsg != nullptr; cmsg = CMSG_NXTHDR( const_cast<msghdr*>( &hdr ), cmsg ))
     {
@@ -232,9 +234,9 @@ else
     ++counter_recv_requests;
 }
 
-void process_packets(const receiver::result& packets)
+void process_messages(const receiver::result& messages)
 {
-std::for_each( packets.begin(), packets.end(), process_packet );
+std::for_each( messages.begin(), messages.end(), process_message );
 }
 
 void show_stat()
@@ -280,13 +282,18 @@ receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), 1024 );
 
 for (;;)
     {
+    ++counter_loops;
     const std::vector<epoll_event> events = unistd::epoll_wait( efd, 4/*maxevents*/, -1/*timeout*/ );
     for (const auto& event : events)
         {
         if ( event.data.fd == sock )
             {
             if ( event.events & EPOLLIN )
-                process_packets( rcv.recv( sock ) );
+                {
+                const receiver::result messages = rcv.recv( sock );
+                counter_recv_messages += messages.size();
+                process_messages( messages );
+                }
             }
         else if ( event.data.fd == timerfd )
             {
