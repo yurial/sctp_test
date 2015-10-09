@@ -43,7 +43,12 @@ receiver::result receiver::recv(int fd, timespec* timeout)
     {
     int nrecv = ::recvmmsg( fd, m_mhdrs.data(), m_mhdrs.size(), 0 /*MSG_WAITFORONE*/, timeout );
     if ( -1 == nrecv )
-        std::system_error( errno, std::system_category(), "recvmmsg" );
+        {
+        if ( EAGAIN == errno )
+            nrecv = 0;
+        else
+            throw std::system_error( errno, std::system_category(), "recvmmsg" );
+        }
     return result( m_mhdrs.begin(), m_mhdrs.begin() + nrecv, *this );
     }
 
