@@ -30,7 +30,8 @@ struct opt
         help = 'h',
         nodelay = 127,
         sndbuf,
-        rcvbuf
+        rcvbuf,
+        max_burst
         };
     };
 
@@ -39,7 +40,9 @@ static const option long_options[] =
     { "help",       no_argument,        nullptr, opt::help      },
     { "nodelay",    no_argument,        nullptr, opt::nodelay   },
     { "sndbuf",     required_argument,  nullptr, opt::sndbuf    },
-    { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    }
+    { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    },
+    { "max-burst",  required_argument,  nullptr, opt::max_burst },
+    { nullptr,      no_argument,        nullptr, 0              }
     };
 
 struct params
@@ -49,6 +52,7 @@ struct params
     std::string port = "31337";
     size_t      sndbuf = 0;
     size_t      rcvbuf = 0;
+    int         max_burst = 0;
     };
 
 params get_params(int argc, char* argv[])
@@ -75,6 +79,9 @@ params get_params(int argc, char* argv[])
                 break;
             case opt::rcvbuf:
                 p.rcvbuf = ext::convert_to<bytes,std::string>( optarg );
+                break;
+            case opt::max_burst:
+                p.max_burst = ext::convert_to<decltype(p.max_burst)>( optarg );
                 break;
 #if 0
             case opt_file_limit:
@@ -186,6 +193,9 @@ subscribe_events( sock );
 
 if ( p.nodelay )
     unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
+
+if ( 0 != p.max_burst )
+    unistd::setsockopt( sock, SOL_SCTP, SCTP_MAX_BURST, p.max_burst );
 
 if ( 0 != p.sndbuf )
     unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, p.sndbuf );
