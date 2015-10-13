@@ -48,6 +48,8 @@ int help(FILE* os, int argc, char* argv[])
     fprintf( os, "  --sndbuf[k|m|g] send buffer\n" );
     fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
     fprintf( os, "  --loops         loops count per second, 0 = disable (default = 1000)\n");
+    fprintf( os, "  --sack-freq     SACK frequency\n" );
+    fprintf( os, "  --sack-timeout  SACK timeout\n" );
     return EXIT_SUCCESS;
     }
 
@@ -61,18 +63,22 @@ struct opt
         nodelay = 127,
         sndbuf,
         rcvbuf,
-        loops
+        loops,
+        sack_freq,
+        sack_timeout
         };
     };
 
 static const option long_options[] =
     {
-    { "help",       no_argument,        nullptr, opt::help      },
-    { "nodelay",    no_argument,        nullptr, opt::nodelay   },
-    { "sndbuf",     required_argument,  nullptr, opt::sndbuf    },
-    { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    },
-    { "loops",      required_argument,  nullptr, opt::loops     },
-    { nullptr,      no_argument,        nullptr, 0              }
+    { "help",           no_argument,        nullptr, opt::help          },
+    { "nodelay",        no_argument,        nullptr, opt::nodelay       },
+    { "sndbuf",         required_argument,  nullptr, opt::sndbuf        },
+    { "rcvbuf",         required_argument,  nullptr, opt::rcvbuf        },
+    { "loops",          required_argument,  nullptr, opt::loops         },
+    { "sack-freq",      required_argument,  nullptr, opt::sack_freq     },
+    { "sack-timeout",   required_argument,  nullptr, opt::sack_timeout  },
+    { nullptr,          no_argument,        nullptr, 0                  }
     };
 
 struct params
@@ -83,6 +89,8 @@ struct params
     size_t      sndbuf = 0;
     size_t      rcvbuf = 0;
     uint32_t    loops = 1000;
+    uint32_t    sack_freq = 0;
+    uint32_t    sack_timeout = 0;
     };
 
 params get_params(int argc, char* argv[])
@@ -112,6 +120,12 @@ params get_params(int argc, char* argv[])
                 break;
             case opt::loops:
                 p.loops = ext::convert_to<decltype(p.loops)>( optarg );
+                break;
+            case opt::sack_freq:
+                p.sack_freq = ext::convert_to<decltype(p.sack_freq)>( optarg );
+                break;
+            case opt::sack_timeout:
+                p.sack_timeout = ext::convert_to<decltype(p.sack_timeout)>( optarg );
                 break;
 #if 0
             case opt_file_limit:
@@ -281,8 +295,11 @@ if ( 0 != p.rcvbuf )
 if ( p.nodelay )
     unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
 
-struct sctp_sack_info sack_info{ 0, 1, 2 };
-unistd::setsockopt( sock, SOL_SCTP, SCTP_DELAYED_SACK, sack_info );
+if ( p.sack_freq || p.sack_timeout )
+    {
+    const struct sctp_sack_info sack_info{ 0, p.sack_timeout, p.sack_freq };
+    unistd::setsockopt( sock, SOL_SCTP, SCTP_DELAYED_SACK, sack_info );
+    }
 
 //TODO: unistd::sctp::bindx
 unistd::bind( sock, addr );
