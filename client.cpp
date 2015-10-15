@@ -207,6 +207,11 @@ if ( 0 != p.max_burst )
 if ( 0 != p.sndbuf )
     unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, p.sndbuf );
 
+int sndbuf = 0;
+socklen_t len = sizeof(sndbuf);
+getsockopt( sock, SOL_SOCKET, SO_SNDBUF, &sndbuf, &len );
+fprintf( stderr, "sndbuf: %d\n", sndbuf );
+
 if ( 0 != p.rcvbuf )
     unistd::setsockopt( sock, SOL_SOCKET, SO_RCVBUF, p.rcvbuf );
 
