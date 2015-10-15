@@ -13,31 +13,34 @@
 
 int help(FILE* os, int argc, char* argv[])
     {
-    fprintf( os, "usage: %s -h [hostname] [port]\n", argv[0] );
+    fprintf( os, "usage: %s [-h] [-n <count>] [hostname] [port]\n", argv[0] );
     fprintf( os, "  --help          help :)\n" );
+    fprintf( os, "  --count         count of messages\n" );
     fprintf( os, "  --nodelay       disable Nagle algorithm\n" );
     fprintf( os, "  --sndbuf[k|m|g] send buffer\n" );
     fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
     return EXIT_SUCCESS;
     }
 
-const char short_options[] = "h";
+const char short_options[] = "hn:";
 
 struct opt
     {
     enum enum_t
         {
         help = 'h',
+        count = 'n',
         nodelay = 127,
         sndbuf,
         rcvbuf,
-        max_burst
+        max_burst,
         };
     };
 
 static const option long_options[] =
     {
     { "help",       no_argument,        nullptr, opt::help      },
+    { "count",      required_argument,  nullptr, opt::count     },
     { "nodelay",    no_argument,        nullptr, opt::nodelay   },
     { "sndbuf",     required_argument,  nullptr, opt::sndbuf    },
     { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    },
@@ -47,6 +50,7 @@ static const option long_options[] =
 
 struct params
     {
+    uint64_t    count = 0;
     bool        nodelay = false;
     std::string hostname = "localhost";
     std::string port = "31337";
@@ -71,6 +75,9 @@ params get_params(int argc, char* argv[])
             case opt::help:
                 help( stdout, argc, argv );
                 exit( EXIT_SUCCESS );
+            case opt::count:
+                p.count = ext::convert_to<decltype(p.count)>( optarg );
+                break;
             case opt::nodelay:
                 p.nodelay = true;
                 break;
@@ -282,10 +289,11 @@ while ( assoc_id == 0 )
 //fcntl( sock, F_SETFL, flags | O_NONBLOCK );
 
 const std::vector<char> packet_x( { 'p', 'a', 'c', 'k', 'e', 't', '_', 'x' } );
-for (;;)
+do
     {
     send_packet( sock, assoc_id, packet_x );
     }
+while ( --p.count );
 
 #if 0
 //TODO: handle packets
