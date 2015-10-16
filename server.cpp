@@ -318,11 +318,13 @@ receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), 1024 );
 const unistd::timespec loop_time( 0, p.loops ? 1000000000L / p.loops : 0);
 const unistd::timespec minimal_sleep_time( 0, 1000L ); //1mcs
 
-for (;;)
+const unistd::timespec start_time = unistd::clock_gettime( CLOCK_MONOTONIC );
+for (uint64_t i = 1;; ++i)
     {
+    const uint64_t estimated_shift = i * 1000000000L / p.loops;
+    const unistd::timespec estimated_end = start_time + unistd::timespec( estimated_shift / 1000000000L, estimated_shift % 1000000000L );
     ++counter_loops;
     const std::vector<epoll_event> events = unistd::epoll_wait( efd, 4/*maxevents*/, -1/*timeout*/ );
-    const unistd::timespec start_time = unistd::clock_gettime( CLOCK_MONOTONIC );
     for (const auto& event : events)
         {
         if ( event.data.fd == sock )
@@ -344,8 +346,7 @@ for (;;)
             raise( SIGTRAP );
         }
     const unistd::timespec end_time = unistd::clock_gettime( CLOCK_MONOTONIC );
-    const unistd::timespec elapse_time = end_time - start_time;
-    const unistd::timespec sleep_time = loop_time - elapse_time;
+    const unistd::timespec sleep_time = estimated_end - end_time;
     if ( sleep_time > minimal_sleep_time )
         unistd::nanosleep( sleep_time );
     }
