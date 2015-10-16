@@ -54,8 +54,8 @@ struct params
     bool        nodelay = false;
     std::string hostname = "localhost";
     std::string port = "31337";
-    size_t      sndbuf = 0;
-    size_t      rcvbuf = 0;
+    int         sndbuf = 0;
+    int         rcvbuf = 0;
     int         max_burst = 0;
     };
 
@@ -210,7 +210,7 @@ if ( 0 != p.sndbuf )
 int sndbuf = 0;
 socklen_t len = sizeof(sndbuf);
 getsockopt( sock, SOL_SOCKET, SO_SNDBUF, &sndbuf, &len );
-fprintf( stderr, "sndbuf: %d\n", sndbuf );
+fprintf( stderr, "sndbuf: set=%d get=%d\n", p.sndbuf, sndbuf );
 
 if ( 0 != p.rcvbuf )
     unistd::setsockopt( sock, SOL_SOCKET, SO_RCVBUF, p.rcvbuf );
