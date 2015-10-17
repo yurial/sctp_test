@@ -315,14 +315,11 @@ unistd::epoll_add( efd, timerfd, EPOLLIN, static_cast<int>( timerfd ) );
 
 receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), 1024 );
 
-const unistd::timespec loop_time( 0, p.loops ? 1000000000L / p.loops : 0);
 const unistd::timespec minimal_sleep_time( 0, 1000L ); //1mcs
 
 const unistd::timespec start_time = unistd::clock_gettime( CLOCK_MONOTONIC );
 for (uint64_t i = 1;; ++i)
     {
-    const uint64_t estimated_shift = i * 1000000000L / p.loops;
-    const unistd::timespec estimated_end = start_time + unistd::timespec( estimated_shift / 1000000000L, estimated_shift % 1000000000L );
     ++counter_loops;
     const std::vector<epoll_event> events = unistd::epoll_wait( efd, 4/*maxevents*/, -1/*timeout*/ );
     for (const auto& event : events)
@@ -345,10 +342,22 @@ for (uint64_t i = 1;; ++i)
         else
             raise( SIGTRAP );
         }
-    const unistd::timespec end_time = unistd::clock_gettime( CLOCK_MONOTONIC );
-    const unistd::timespec sleep_time = estimated_end - end_time;
-    if ( sleep_time > minimal_sleep_time )
-        unistd::nanosleep( sleep_time );
+
+    if ( p.loops )
+        {
+        const uint64_t estimated_shift = static_cast<double>( i ) * 1000000000.0 / static_cast<double>( p.loops );
+        const unistd::timespec estimated_end = start_time + unistd::timespec( estimated_shift / 1000000000L, estimated_shift % 1000000000L );
+        const unistd::timespec end_time = unistd::clock_gettime( CLOCK_MONOTONIC );
+        const unistd::timespec sleep_time = estimated_end - end_time;
+        if ( sleep_time > minimal_sleep_time )
+            unistd::nanosleep( sleep_time );
+        else if ( sleep_time < unistd::timespec( 0, 0 ) )
+            {
+            //fix 'i'
+            const unistd::timespec elapse_time = end_time - start_time;
+            i = (static_cast<double>(elapse_time.tv_sec) + static_cast<double>(elapse_time.tv_nsec) / 1000000000.0) * static_cast<double>( p.loops );
+            }
+        }
     }
 
 #if 0
