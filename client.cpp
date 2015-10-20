@@ -6,16 +6,28 @@
 #include <netinet/sctp.h>
 
 #include <iostream>
+#include <limits>
 
 #include <ext/convert.hpp>
 #include <unistd/fd.hpp>
 #include <unistd/netdb.hpp>
+
+#if 0
+sctp_assocparams assoc_params;
+assoc_params.sasoc_assoc_id
+assoc_params.sasoc_asocmaxrxt
+assoc_params.sasoc_number_peer_destinations
+assoc_params.sasoc_peer_rwnd
+assoc_params.sasoc_local_rwnd
+assoc_params.sasoc_cookie_life
+#endif
 
 int help(FILE* os, int argc, char* argv[])
     {
     fprintf( os, "usage: %s [-h] [-n <count>] [hostname] [port]\n", argv[0] );
     fprintf( os, "  --help          help :)\n" );
     fprintf( os, "  --count         count of messages\n" );
+    fprintf( os, "  --batch         count of messages per sendmmsg\n" );
     fprintf( os, "  --nodelay       disable Nagle algorithm\n" );
     fprintf( os, "  --sndbuf[k|m|g] send buffer\n" );
     fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
@@ -31,6 +43,7 @@ struct opt
         help = 'h',
         count = 'n',
         nodelay = 127,
+        batch,
         sndbuf,
         rcvbuf,
         max_burst,
@@ -41,6 +54,7 @@ static const option long_options[] =
     {
     { "help",       no_argument,        nullptr, opt::help      },
     { "count",      required_argument,  nullptr, opt::count     },
+    { "batch",      required_argument,  nullptr, opt::batch     },
     { "nodelay",    no_argument,        nullptr, opt::nodelay   },
     { "sndbuf",     required_argument,  nullptr, opt::sndbuf    },
     { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    },
@@ -50,10 +64,11 @@ static const option long_options[] =
 
 struct params
     {
-    uint64_t    count = 0;
+    uint64_t    count = std::numeric_limits<uint64_t>::max();
     bool        nodelay = false;
     std::string hostname = "localhost";
     std::string port = "31337";
+    size_t      batch = 1024;
     int         sndbuf = 0;
     int         rcvbuf = 0;
     int         max_burst = 0;
@@ -117,60 +132,6 @@ params get_params(int argc, char* argv[])
     return p;
     }
 
-std::string readln()
-    {
-    std::string str;
-    std::cin >> str;
-    return str;
-    }
-
-std::vector<char> gen_packet()
-{
-std::string str = readln();
-return std::vector<char>( str.begin(), str.end() );
-}
-
-void send_packet(int sock, sctp_assoc_t assoc_id, const std::vector<char>& msg)
-{
-std::vector<char> cmsg_buff( CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ) );
-struct iovec iov;
-memset( &iov, 0, sizeof(iov) );
-iov.iov_base = const_cast<char*>( msg.data() );
-iov.iov_len = msg.size();
-
-struct msghdr hdr;
-memset( &hdr, 0, sizeof(hdr) );
-hdr.msg_name = nullptr;
-hdr.msg_namelen = 0;
-hdr.msg_iov = &iov;
-hdr.msg_iovlen = 1;
-hdr.msg_flags = 0;
-hdr.msg_control = cmsg_buff.data();
-hdr.msg_controllen = cmsg_buff.size();
-
-cmsghdr* cmsg = CMSG_FIRSTHDR( &hdr );
-cmsg->cmsg_level = IPPROTO_SCTP;
-cmsg->cmsg_type = SCTP_SNDRCV;
-cmsg->cmsg_len = CMSG_LEN( sizeof( sctp_sndrcvinfo ) );
-sctp_sndrcvinfo& cmsg_data = *reinterpret_cast<sctp_sndrcvinfo*>( CMSG_DATA( cmsg ) );
-cmsg_data.sinfo_stream = 0;
-cmsg_data.sinfo_ssn = 0; //ignored
-cmsg_data.sinfo_flags = SCTP_UNORDERED;
-cmsg_data.sinfo_ppid = 31337;
-cmsg_data.sinfo_context = 123456;
-cmsg_data.sinfo_timetolive = 0;
-cmsg_data.sinfo_tsn = 0; //ignored
-cmsg_data.sinfo_cumtsn = 0; //ignored
-cmsg_data.sinfo_assoc_id = assoc_id;
-
-ssize_t nsend = 0;
-TEMP_FAILURE_RETRY( nsend = sendmsg( sock, &hdr, 0 ) );
-if ( 0 == nsend )
-    raise( SIGTRAP );
-if ( -1 == nsend )
-    raise( SIGTRAP );
-}
-
 void subscribe_events(int fd)
 {
 struct sctp_event_subscribe events;
@@ -222,17 +183,6 @@ init_params.sinit_max_instreams = 1;
 init_params.sinit_max_attempts = 3;
 init_params.sinit_max_init_timeo = 100;
 unistd::setsockopt( sock, SOL_SCTP, SCTP_INITMSG, init_params );
-
-#if 0
-unistd::setsockopt( sock, SOL_SCTP, SCTP_MAXBURST, 1024);
-sctp_assocparams assoc_params;
-assoc_params.sasoc_assoc_id
-assoc_params.sasoc_asocmaxrxt
-assoc_params.sasoc_number_peer_destinations
-assoc_params.sasoc_peer_rwnd
-assoc_params.sasoc_local_rwnd
-assoc_params.sasoc_cookie_life
-#endif
 
 unistd::connect( sock, addr );
 
@@ -293,18 +243,54 @@ while ( assoc_id == 0 )
 //int flags = fcntl( sock, F_GETFL, 0 );
 //fcntl( sock, F_SETFL, flags | O_NONBLOCK );
 
-const std::vector<char> packet_x( { 'p', 'a', 'c', 'k', 'e', 't', '_', 'x' } );
-do
-    {
-    send_packet( sock, assoc_id, packet_x );
-    }
-while ( --p.count );
+const std::vector<char> msg( { 'p', 'a', 'c', 'k', 'e', 't', '_', 'x' } );
+struct iovec iov;
+iov.iov_base = const_cast<char*>( msg.data() );
+iov.iov_len = msg.size();
+std::vector<char> cmsg_buff( CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ) );
 
-#if 0
-//TODO: handle packets
-sendmsg
-recvmsg
-#endif
+struct mmsghdr mhdr;
+memset( &mhdr, 0, sizeof(mhdr) );
+struct msghdr& hdr = mhdr.msg_hdr;
+hdr.msg_name = nullptr;
+hdr.msg_namelen = 0;
+hdr.msg_iov = &iov;
+hdr.msg_iovlen = 1;
+hdr.msg_flags = 0;
+hdr.msg_control = cmsg_buff.data();
+hdr.msg_controllen = cmsg_buff.size();
+
+cmsghdr* cmsg = CMSG_FIRSTHDR( &hdr );
+cmsg->cmsg_level = IPPROTO_SCTP;
+cmsg->cmsg_type = SCTP_SNDRCV;
+cmsg->cmsg_len = CMSG_LEN( sizeof( sctp_sndrcvinfo ) );
+sctp_sndrcvinfo& cmsg_data = *reinterpret_cast<sctp_sndrcvinfo*>( CMSG_DATA( cmsg ) );
+cmsg_data.sinfo_stream = 0;
+cmsg_data.sinfo_ssn = 0; //ignored
+cmsg_data.sinfo_flags = SCTP_UNORDERED;
+cmsg_data.sinfo_ppid = 31337;
+cmsg_data.sinfo_context = 123456;
+cmsg_data.sinfo_timetolive = 0;
+cmsg_data.sinfo_tsn = 0; //ignored
+cmsg_data.sinfo_cumtsn = 0; //ignored
+cmsg_data.sinfo_assoc_id = assoc_id;
+
+std::vector<mmsghdr> mhdrs( p.batch, mhdr );
+
+while ( p.count )
+    {
+    const ssize_t count = std::min<uint64_t>( p.batch, p.count );
+    ssize_t nsend = 0;
+    TEMP_FAILURE_RETRY( nsend = sendmmsg( sock, mhdrs.data(), count, 0 ) );
+    if ( 0 == nsend )
+        raise( SIGTRAP );
+    if ( -1 == nsend )
+        raise( SIGTRAP );
+    if ( count != nsend )
+        raise( SIGTRAP );
+    p.count -= count;
+    }
+
 //raise( SIGTRAP );
 
 sock.close();
