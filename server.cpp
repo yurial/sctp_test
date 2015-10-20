@@ -1,4 +1,5 @@
 #include <sys/timerfd.h>
+#include <sys/mman.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <getopt.h>
@@ -59,6 +60,7 @@ int help(FILE* os, int argc, char* argv[])
     {
     fprintf( os, "usage: %s -h [hostname] [port]\n", argv[0] );
     fprintf( os, "  --help          help :)\n" );
+    fprintf( os, "  --workers       count of workers\n" );
     fprintf( os, "  --nodelay       disable Nagle algorithm\n" );
     fprintf( os, "  --sndbuf[k|m|g] send buffer\n" );
     fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
@@ -70,13 +72,14 @@ int help(FILE* os, int argc, char* argv[])
     return EXIT_SUCCESS;
     }
 
-const char short_options[] = "h";
+const char short_options[] = "hw:";
 
 struct opt
     {
     enum enum_t
         {
         help = 'h',
+        workers = 'w',
         nodelay = 127,
         sndbuf,
         rcvbuf,
@@ -91,6 +94,7 @@ struct opt
 static const option long_options[] =
     {
     { "help",           no_argument,        nullptr, opt::help          },
+    { "workers",        required_argument,  nullptr, opt::workers       },
     { "nodelay",        no_argument,        nullptr, opt::nodelay       },
     { "sndbuf",         required_argument,  nullptr, opt::sndbuf        },
     { "rcvbuf",         required_argument,  nullptr, opt::rcvbuf        },
@@ -104,6 +108,7 @@ static const option long_options[] =
 
 struct params
     {
+    size_t      workers = 1;
     bool        nodelay = false;
     std::string hostname = "localhost";
     std::string port = "31337";
@@ -132,6 +137,9 @@ params get_params(int argc, char* argv[])
             case opt::help:
                 help( stdout, argc, argv );
                 exit( EXIT_SUCCESS );
+            case opt::workers:
+                p.workers = ext::convert_to<decltype(p.workers)>( optarg );
+                break;
             case opt::nodelay:
                 p.nodelay = true;
                 break;
@@ -336,17 +344,35 @@ unistd::bind( sock, addr );
 unistd::listen( sock, 128 );
 subscribe_events( sock );
 
-unistd::fd timerfd = std::move( timerfd_create( CLOCK_MONOTONIC, TFD_NONBLOCK ) );
-itimerspec timeout{ { 1, 0 }, { 1, 0 } };
-timerfd_settime( timerfd, 0, &timeout, nullptr );
+void* shared_buf = ::mmap( nullptr, sizeof(counters), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, 0, 0 );
+
+g_counters.reset( new( shared_buf ) counters() );
+
+bool master = true;
+for (size_t i = 1; i < p.workers; ++i)
+    {
+    if( 0 == fork() )
+        {
+        master = false;
+        break;
+        }
+    }
+
 unistd::fd efd = std::move( unistd::epoll_create() );
 unistd::epoll_add( efd, sock, EPOLLIN, static_cast<int>( sock ) );
-unistd::epoll_add( efd, timerfd, EPOLLIN, static_cast<int>( timerfd ) );
+
+unistd::fd timerfd;
+if ( master )
+    {
+    timerfd = std::move( timerfd_create( CLOCK_MONOTONIC, TFD_NONBLOCK ) );
+    itimerspec timeout{ { 1, 0 }, { 1, 0 } };
+    timerfd_settime( timerfd, 0, &timeout, nullptr );
+    unistd::epoll_add( efd, timerfd, EPOLLIN, static_cast<int>( timerfd ) );
+    }
 
 receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), p.batch );
 
 const unistd::timespec minimal_sleep_time( 0, 1000L ); //1mcs
-
 const unistd::timespec start_time = unistd::clock_gettime( CLOCK_MONOTONIC );
 for (uint64_t i = 1;; ++i)
     {
