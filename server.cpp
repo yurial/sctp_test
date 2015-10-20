@@ -38,6 +38,7 @@ STRENUM_CONVERT_TO( sctp_sac_state )
 
 uint64_t counter_recv_requests = 0;
 uint64_t counter_recv_messages = 0;
+uint64_t counter_recv_calls = 0;
 uint64_t counter_loops = 0;
 
 int help(FILE* os, int argc, char* argv[])
@@ -49,6 +50,7 @@ int help(FILE* os, int argc, char* argv[])
     fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
     fprintf( os, "  --loops         loops count per second, 0 = disable (default = 1000)\n");
     fprintf( os, "  --batch         count of messages per recvmmsg (default = 1024)\n");
+    fprintf( os, "  --boost         call recvmmsg if nrecv == batch, not more then 'boost' times (default = 16)\n" );
     fprintf( os, "  --sack-freq     SACK frequency\n" );
     fprintf( os, "  --sack-timeout  SACK timeout\n" );
     return EXIT_SUCCESS;
@@ -66,6 +68,7 @@ struct opt
         rcvbuf,
         loops,
         batch,
+        boost,
         sack_freq,
         sack_timeout
         };
@@ -79,6 +82,7 @@ static const option long_options[] =
     { "rcvbuf",         required_argument,  nullptr, opt::rcvbuf        },
     { "loops",          required_argument,  nullptr, opt::loops         },
     { "batch",          required_argument,  nullptr, opt::batch         },
+    { "boost",          required_argument,  nullptr, opt::boost         },
     { "sack-freq",      required_argument,  nullptr, opt::sack_freq     },
     { "sack-timeout",   required_argument,  nullptr, opt::sack_timeout  },
     { nullptr,          no_argument,        nullptr, 0                  }
@@ -93,6 +97,7 @@ struct params
     size_t      rcvbuf = 0;
     uint32_t    loops = 1000;
     size_t      batch = 1024;
+    size_t      boost = 16;
     uint32_t    sack_freq = 0;
     uint32_t    sack_timeout = 0;
     };
@@ -127,6 +132,9 @@ params get_params(int argc, char* argv[])
                 break;
             case opt::batch:
                 p.batch = ext::convert_to<decltype(p.batch)>( optarg );
+                break;
+            case opt::boost:
+                p.boost = ext::convert_to<decltype(p.boost)>( optarg );
                 break;
             case opt::sack_freq:
                 p.sack_freq = ext::convert_to<decltype(p.sack_freq)>( optarg );
@@ -272,11 +280,12 @@ std::for_each( messages.begin(), messages.end(), process_message );
 void show_stat()
 {
 fprintf( stdout, "loops: %lu\n", counter_loops );
-fprintf( stdout, "msg per recv: %lu\n", counter_recv_messages / counter_loops );
+fprintf( stdout, "msg per recv: %0.2lf\n", counter_recv_calls? static_cast<double>(counter_recv_messages) / static_cast<double>(counter_recv_calls) : 0 );
 fprintf( stdout, "rps: %lu\n", counter_recv_requests );
 fprintf( stdout, "\n" );
 
 counter_loops = 0;
+counter_recv_calls = 0;
 counter_recv_messages = 0;
 counter_recv_requests = 0;
 }
@@ -335,9 +344,15 @@ for (uint64_t i = 1;; ++i)
             {
             if ( event.events & EPOLLIN )
                 {
-                const receiver::result messages = rcv.recv( sock );
-                counter_recv_messages += messages.size();
-                process_messages( messages );
+                for (size_t boost_i = 0; boost_i < p.boost; ++boost_i)
+                    {
+                    ++counter_recv_calls;
+                    const receiver::result messages = rcv.recv( sock );
+                    counter_recv_messages += messages.size();
+                    process_messages( messages );
+                    if ( messages.size() < p.batch )
+                        break;
+                    }
                 }
             }
         else if ( event.data.fd == timerfd )
