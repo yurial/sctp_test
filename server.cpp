@@ -7,6 +7,8 @@
 #include <fcntl.h>
 
 #include <iostream>
+#include <memory>
+#include <atomic>
 
 #include <ext/convert.hpp>
 #include <ext/strenum.hpp>
@@ -36,10 +38,22 @@ ext::strenum<sctp_sac_state>::pair sctp_sac_state_str[] =
 STRENUM_INIT_VALUES( sctp_sac_state, sctp_sac_state_str, static_cast<sctp_sac_state>( -1 ) )
 STRENUM_CONVERT_TO( sctp_sac_state )
 
-uint64_t counter_recv_requests = 0;
-uint64_t counter_recv_messages = 0;
-uint64_t counter_recv_calls = 0;
-uint64_t counter_loops = 0;
+struct counters
+    {
+    std::atomic<uint64_t>   recv_requests;
+    std::atomic<uint64_t>   recv_messages;
+    std::atomic<uint64_t>   recv_calls;
+    std::atomic<uint64_t>   loops;
+        counters():
+                recv_requests( 0 ),
+                recv_messages( 0 ),
+                recv_calls( 0 ),
+                loops( 0 )
+            {
+            }
+    };
+
+std::unique_ptr<counters> g_counters( new counters );
 
 int help(FILE* os, int argc, char* argv[])
     {
@@ -269,7 +283,7 @@ for (cmsghdr* cmsg = CMSG_FIRSTHDR( &hdr ); cmsg != nullptr; cmsg = CMSG_NXTHDR(
 if ( hdr.msg_flags & MSG_NOTIFICATION )
     notification_handle( *reinterpret_cast<sctp_notification*>( hdr.msg_iov[0].iov_base ) );
 else
-    ++counter_recv_requests;
+    ++g_counters->recv_requests;
 }
 
 void process_messages(const receiver::result& messages)
@@ -279,15 +293,15 @@ std::for_each( messages.begin(), messages.end(), process_message );
 
 void show_stat()
 {
-fprintf( stdout, "loops: %lu\n", counter_loops );
-fprintf( stdout, "msg per recv: %0.2lf\n", counter_recv_calls? static_cast<double>(counter_recv_messages) / static_cast<double>(counter_recv_calls) : 0 );
-fprintf( stdout, "rps: %lu\n", counter_recv_requests );
+fprintf( stdout, "loops: %lu\n", g_counters->loops.load() );
+fprintf( stdout, "msg per recv: %0.2lf\n", g_counters->recv_calls.load()? static_cast<double>(g_counters->recv_messages.load()) / static_cast<double>(g_counters->recv_calls.load()) : 0 );
+fprintf( stdout, "rps: %lu\n", g_counters->recv_requests.load() );
 fprintf( stdout, "\n" );
 
-counter_loops = 0;
-counter_recv_calls = 0;
-counter_recv_messages = 0;
-counter_recv_requests = 0;
+g_counters->loops = 0;
+g_counters->recv_calls = 0;
+g_counters->recv_messages = 0;
+g_counters->recv_requests = 0;
 }
 
 int main(int argc, char* argv[])
@@ -336,7 +350,7 @@ const unistd::timespec minimal_sleep_time( 0, 1000L ); //1mcs
 const unistd::timespec start_time = unistd::clock_gettime( CLOCK_MONOTONIC );
 for (uint64_t i = 1;; ++i)
     {
-    ++counter_loops;
+    ++g_counters->loops;
     const std::vector<epoll_event> events = unistd::epoll_wait( efd, 4/*maxevents*/, -1/*timeout*/ );
     for (const auto& event : events)
         {
@@ -346,9 +360,9 @@ for (uint64_t i = 1;; ++i)
                 {
                 for (size_t boost_i = 0; boost_i < p.boost; ++boost_i)
                     {
-                    ++counter_recv_calls;
+                    ++g_counters->recv_calls;
                     const receiver::result messages = rcv.recv( sock );
-                    counter_recv_messages += messages.size();
+                    g_counters->recv_messages += messages.size();
                     process_messages( messages );
                     if ( messages.size() < p.batch )
                         break;
