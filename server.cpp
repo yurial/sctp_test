@@ -48,6 +48,7 @@ int help(FILE* os, int argc, char* argv[])
     fprintf( os, "  --sndbuf[k|m|g] send buffer\n" );
     fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
     fprintf( os, "  --loops         loops count per second, 0 = disable (default = 1000)\n");
+    fprintf( os, "  --batch         count of messages per recvmmsg (default = 1024)\n");
     fprintf( os, "  --sack-freq     SACK frequency\n" );
     fprintf( os, "  --sack-timeout  SACK timeout\n" );
     return EXIT_SUCCESS;
@@ -64,6 +65,7 @@ struct opt
         sndbuf,
         rcvbuf,
         loops,
+        batch,
         sack_freq,
         sack_timeout
         };
@@ -76,6 +78,7 @@ static const option long_options[] =
     { "sndbuf",         required_argument,  nullptr, opt::sndbuf        },
     { "rcvbuf",         required_argument,  nullptr, opt::rcvbuf        },
     { "loops",          required_argument,  nullptr, opt::loops         },
+    { "batch",          required_argument,  nullptr, opt::batch         },
     { "sack-freq",      required_argument,  nullptr, opt::sack_freq     },
     { "sack-timeout",   required_argument,  nullptr, opt::sack_timeout  },
     { nullptr,          no_argument,        nullptr, 0                  }
@@ -89,6 +92,7 @@ struct params
     size_t      sndbuf = 0;
     size_t      rcvbuf = 0;
     uint32_t    loops = 1000;
+    size_t      batch = 1024;
     uint32_t    sack_freq = 0;
     uint32_t    sack_timeout = 0;
     };
@@ -120,6 +124,9 @@ params get_params(int argc, char* argv[])
                 break;
             case opt::loops:
                 p.loops = ext::convert_to<decltype(p.loops)>( optarg );
+                break;
+            case opt::batch:
+                p.batch = ext::convert_to<decltype(p.batch)>( optarg );
                 break;
             case opt::sack_freq:
                 p.sack_freq = ext::convert_to<decltype(p.sack_freq)>( optarg );
@@ -313,7 +320,7 @@ unistd::fd efd = std::move( unistd::epoll_create() );
 unistd::epoll_add( efd, sock, EPOLLIN, static_cast<int>( sock ) );
 unistd::epoll_add( efd, timerfd, EPOLLIN, static_cast<int>( timerfd ) );
 
-receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), 1024 );
+receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), p.batch );
 
 const unistd::timespec minimal_sleep_time( 0, 1000L ); //1mcs
 
