@@ -39,9 +39,35 @@ void receiver::cleanup(std::vector<mmsghdr>::iterator begin, std::vector<mmsghdr
     std::for_each( begin, end, [this](mmsghdr& mhdr) { mhdr.msg_hdr.msg_controllen = m_cmsg_size; } );
     }
 
-receiver::result receiver::recv(int fd, timespec* timeout)
+receiver::result receiver::recv(int fd)
+{
+if ( m_mhdrs.size() > 1 )
+    return recvmmsg( fd );
+else if ( m_mhdrs.size() == 1 )
+    return recvmsg( fd );
+return result( m_mhdrs.end(), m_mhdrs.end(), *this );
+}
+
+receiver::result receiver::recvmsg(int fd)
+{
+ssize_t nrecv = ::recvmsg( fd, &m_mhdrs[0].msg_hdr, 0 /*flags*/ );
+if ( -1 == nrecv )
     {
-    int nrecv = ::recvmmsg( fd, m_mhdrs.data(), m_mhdrs.size(), 0 /*MSG_WAITFORONE*/, timeout );
+    if ( EAGAIN == errno )
+        nrecv = 0;
+    else
+        throw std::system_error( errno, std::system_category(), "recvmsg" );
+    }
+if ( 0 == nrecv )
+    return result( m_mhdrs.end(), m_mhdrs.end(), *this );
+
+m_mhdrs[0].msg_len = nrecv;
+return result( m_mhdrs.begin(), m_mhdrs.begin() + 1, *this );
+}
+
+receiver::result receiver::recvmmsg(int fd)
+    {
+    int nrecv = ::recvmmsg( fd, m_mhdrs.data(), m_mhdrs.size(), 0 /*MSG_WAITFORONE*/, nullptr );
     if ( -1 == nrecv )
         {
         if ( EAGAIN == errno )

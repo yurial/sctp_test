@@ -66,7 +66,7 @@ int help(FILE* os, int argc, char* argv[])
     fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
     fprintf( os, "  --loops         loops count per second, 0 = disable (default = 1000)\n");
     fprintf( os, "  --batch         count of messages per recvmmsg (default = 1024)\n");
-    fprintf( os, "  --boost         call recvmmsg if nrecv == batch, not more then 'boost' times (default = 16)\n" );
+    fprintf( os, "  --boost         call recvmmsg if nrecv == batch, not more then 'boost' times (default = 1)\n" );
     fprintf( os, "  --sack-freq     SACK frequency\n" );
     fprintf( os, "  --sack-timeout  SACK timeout\n" );
     return EXIT_SUCCESS;
@@ -116,7 +116,7 @@ struct params
     size_t      rcvbuf = 0;
     uint32_t    loops = 1000;
     size_t      batch = 1024;
-    size_t      boost = 16;
+    size_t      boost = 1;
     uint32_t    sack_freq = 0;
     uint32_t    sack_timeout = 0;
     };
