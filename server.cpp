@@ -198,7 +198,7 @@ events.sctp_authentication_event = 1;
 unistd::setsockopt( fd, IPPROTO_SCTP, SCTP_EVENTS, &events, sizeof(events) );
 }
 
-void notification_handle(const sctp_notification& notify)
+void notification_handle(int efd, int sock, bool peeloff, const sctp_notification& notify)
 {
 switch ( notify.sn_header.sn_type )
     {
@@ -206,6 +206,23 @@ switch ( notify.sn_header.sn_type )
         {
         const auto& sac = notify.sn_assoc_change;
 std::cout << "^^^ assoc_change: state=" << ext::convert_to<std::string>( static_cast<sctp_sac_state>( sac.sac_state ) ) << " assoc_id=" << sac.sac_assoc_id << " error=" << sac.sac_error << " in=" << sac.sac_inbound_streams << " out=" << sac.sac_outbound_streams << std::endl;
+        if ( peeloff )
+            {
+            switch ( sac.sac_state )
+                {
+                case SCTP_COMM_UP:
+                    {
+                    int fd = sctp_peeloff( sock, sac.sac_assoc_id );
+                    unistd::epoll_add( efd, fd, EPOLLONESHOT | EPOLLIN, fd );
+                    break;
+                    }
+                case SCTP_SHUTDOWN_COMP:
+                    unistd::epoll_del( efd, sock ); 
+                    break;
+                default:
+                    break;
+                }
+            }
         break;
         }
     case SCTP_SEND_FAILED:
@@ -252,7 +269,7 @@ std::cout << "^^^ assoc_change: state=" << ext::convert_to<std::string>( static_
     };
 }
 
-void process_message(const mmsghdr& message)
+void process_message(int efd, int sock, bool peeloff, const mmsghdr& message)
 {
 const msghdr& hdr = message.msg_hdr;
 size_t nrecv = message.msg_len;
@@ -279,14 +296,15 @@ for (cmsghdr* cmsg = CMSG_FIRSTHDR( &hdr ); cmsg != nullptr; cmsg = CMSG_NXTHDR(
         } //if
     } //for
 if ( hdr.msg_flags & MSG_NOTIFICATION )
-    notification_handle( *reinterpret_cast<sctp_notification*>( hdr.msg_iov[0].iov_base ) );
+    notification_handle( efd, sock, peeloff, *reinterpret_cast<sctp_notification*>( hdr.msg_iov[0].iov_base ) );
 else
     ++g_counters->recv_requests;
 }
 
-void process_messages(const receiver::result& messages)
+void process_messages(int efd, int sock, bool peeloff, const receiver::result& messages)
 {
-std::for_each( messages.begin(), messages.end(), process_message );
+for (const auto& message : messages)
+    process_message( efd, sock, peeloff, message );
 }
 
 void show_stat()
@@ -340,12 +358,12 @@ if ( p.sack_freq || p.sack_timeout )
 unistd::bind( sock, addr );
 unistd::listen( sock, 128 );
 subscribe_events( sock );
-unistd::epoll_add( efd, sock, EPOLLIN, static_cast<int>( sock ) );
+unistd::epoll_add( efd, sock, p.peeloff? EPOLLONESHOT | EPOLLIN : EPOLLIN, static_cast<int>( sock ) );
 
 unistd::fd timerfd = std::move( timerfd_create( CLOCK_MONOTONIC, TFD_NONBLOCK ) );
 itimerspec timeout{ { 1, 0 }, { 1, 0 } };
 timerfd_settime( timerfd, 0, &timeout, nullptr );
-unistd::epoll_add( efd, timerfd, EPOLLET | EPOLLIN, static_cast<int>( timerfd ) );
+unistd::epoll_add( efd, timerfd, EPOLLONESHOT | EPOLLIN, static_cast<int>( timerfd ) );
 
 receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), p.batch );
 
@@ -358,35 +376,37 @@ for (size_t i = 1; i < p.workers; ++i)
         }
     }
 
-//EPOLLONESHOT
 const unistd::timespec minimal_sleep_time( 0, 1000L ); //1mcs
 const unistd::timespec start_time = unistd::clock_gettime( CLOCK_MONOTONIC );
 for (uint64_t i = 1;; ++i)
     {
-    ++g_counters->loops;
     const std::vector<epoll_event> events = unistd::epoll_wait( efd, 1/*maxevents*/, -1/*timeout*/ );
-    for (const auto& event : events)
+    const auto& event = events[ 0 ];
+    if ( event.data.fd == timerfd )
         {
-        if ( event.data.fd == sock )
+        uint64_t x = 0;
+        unistd::read_all( timerfd, &x, sizeof(x) );
+        unistd::epoll_mod( efd, timerfd, EPOLLONESHOT | EPOLLIN, timerfd );
+        show_stat();
+        continue;
+        }
+    else
+        {
+        if ( event.events & EPOLLIN )
             {
-            if ( event.events & EPOLLIN )
-                {
-                ++g_counters->recv_calls;
-                const receiver::result messages = rcv.recv( sock );
-                g_counters->recv_messages += messages.size();
-                process_messages( messages );
-                }
+            ++g_counters->recv_calls;
+            int fd = event.data.fd;
+            //fprintf( stderr, "worker_id: %zu recv msg from %d\n", g_worker_id, fd );
+            const receiver::result messages = rcv.recv( fd );
+            //fprintf( stderr, "worker_id: %zu recv %zu msg from %d\n", g_worker_id, messages.size(), fd );
+            if ( p.peeloff )
+                unistd::epoll_mod( efd, fd, EPOLLONESHOT | EPOLLIN, fd );
+            g_counters->recv_messages += messages.size();
+            process_messages( efd, sock, p.peeloff, messages );
             }
-        else if ( event.data.fd == timerfd )
-            {
-            uint64_t x;
-            unistd::read_all( timerfd, &x, sizeof(x) );
-            show_stat();
-            }
-        else
-            raise( SIGTRAP );
         }
 
+    ++g_counters->loops;
     if ( p.loops )
         {
         const uint64_t estimated_shift = static_cast<double>( i ) * 1000000000.0 / static_cast<double>( p.loops );

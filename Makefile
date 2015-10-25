@@ -10,7 +10,7 @@ endif
 
 CPPFLAGS+=$(INCLUDE) $(COMMON_CPPFLAGS)
 LDFLAGS+=
-LOADLIBES+=
+LOADLIBES+=-lsctp
 
 ALL:=client server
 all: $(ALL)
