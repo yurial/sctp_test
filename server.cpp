@@ -1,5 +1,6 @@
 #include <sys/timerfd.h>
 #include <sys/mman.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <getopt.h>
@@ -19,6 +20,7 @@
 #include <unistd/time.hpp>
 
 #include "receiver.hpp"
+#include "fork.hpp"
 
 #if 0
     { SCTP_ADDR_AVAILABLE, "SCTP_ADDR_AVAILABLE" },
@@ -55,6 +57,7 @@ struct counters
     };
 
 std::unique_ptr<counters> g_counters( new counters );
+size_t g_worker_id = 0;
 
 int help(FILE* os, int argc, char* argv[])
     {
@@ -66,9 +69,9 @@ int help(FILE* os, int argc, char* argv[])
     fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
     fprintf( os, "  --loops         loops count per second, 0 = disable (default = 1000)\n");
     fprintf( os, "  --batch         count of messages per recvmmsg (default = 1024)\n");
-    fprintf( os, "  --boost         call recvmmsg if nrecv == batch, not more then 'boost' times (default = 1)\n" );
     fprintf( os, "  --sack-freq     SACK frequency\n" );
     fprintf( os, "  --sack-timeout  SACK timeout\n" );
+    fprintf( os, "  --peeloff       branch off an association into a separate socket\n" );
     return EXIT_SUCCESS;
     }
 
@@ -85,9 +88,9 @@ struct opt
         rcvbuf,
         loops,
         batch,
-        boost,
         sack_freq,
-        sack_timeout
+        sack_timeout,
+        peeloff
         };
     };
 
@@ -100,9 +103,9 @@ static const option long_options[] =
     { "rcvbuf",         required_argument,  nullptr, opt::rcvbuf        },
     { "loops",          required_argument,  nullptr, opt::loops         },
     { "batch",          required_argument,  nullptr, opt::batch         },
-    { "boost",          required_argument,  nullptr, opt::boost         },
     { "sack-freq",      required_argument,  nullptr, opt::sack_freq     },
     { "sack-timeout",   required_argument,  nullptr, opt::sack_timeout  },
+    { "peeloff",        no_argument,        nullptr, opt::peeloff       },
     { nullptr,          no_argument,        nullptr, 0                  }
     };
 
@@ -116,9 +119,9 @@ struct params
     size_t      rcvbuf = 0;
     uint32_t    loops = 1000;
     size_t      batch = 1024;
-    size_t      boost = 1;
     uint32_t    sack_freq = 0;
     uint32_t    sack_timeout = 0;
+    bool        peeloff = false;
     };
 
 params get_params(int argc, char* argv[])
@@ -155,28 +158,15 @@ params get_params(int argc, char* argv[])
             case opt::batch:
                 p.batch = ext::convert_to<decltype(p.batch)>( optarg );
                 break;
-            case opt::boost:
-                p.boost = ext::convert_to<decltype(p.boost)>( optarg );
-                break;
             case opt::sack_freq:
                 p.sack_freq = ext::convert_to<decltype(p.sack_freq)>( optarg );
                 break;
             case opt::sack_timeout:
                 p.sack_timeout = ext::convert_to<decltype(p.sack_timeout)>( optarg );
                 break;
-#if 0
-            case opt_file_limit:
-                p.file_limit = ext::convert_to<bytes,std::string>( optarg );
+            case opt::peeloff:
+                p.peeloff = true;
                 break;
-            case opt_page_size:
-                p.page_size = ext::convert_to<bytes,std::string>( optarg );
-                if ( p.page_size > std::numeric_limits<int32_t>::max() )
-                    {
-                    syslog( LOG_ERR ) << "page size is too big" << std::endl;
-                    exit( EXIT_FAILURE );
-                    }
-                break;
-#endif
             case 0:
                 fprintf( stderr, "Invalid command-line option\n" );
                 help( stderr, argc, argv );
@@ -301,6 +291,7 @@ std::for_each( messages.begin(), messages.end(), process_message );
 
 void show_stat()
 {
+fprintf( stdout, "worker_id: %zu\n", g_worker_id );
 fprintf( stdout, "loops: %lu\n", g_counters->loops.load() );
 fprintf( stdout, "msg per recv: %0.2lf\n", g_counters->recv_calls.load()? static_cast<double>(g_counters->recv_messages.load()) / static_cast<double>(g_counters->recv_calls.load()) : 0 );
 fprintf( stdout, "rps: %lu\n", g_counters->recv_requests.load() );
@@ -315,7 +306,13 @@ g_counters->recv_requests = 0;
 int main(int argc, char* argv[])
 {
 signal( SIGTRAP, SIG_IGN );
+void* shared_buf = ::mmap( nullptr, sizeof(counters), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, 0, 0 );
+g_counters.reset( new( shared_buf ) counters() );
+
 params p = get_params( argc, argv );
+
+unistd::fd efd = std::move( unistd::epoll_create() );
+
 unistd::addrinfo hint = addrinfo{ AI_PASSIVE, AF_INET6, SOCK_SEQPACKET, IPPROTO_SCTP, 0, nullptr, nullptr, nullptr };
 std::vector<unistd::addrinfo> addrs = unistd::getaddrinfo( p.hostname, p.port, hint );
 const unistd::addrinfo& addr = addrs.at( 0 );
@@ -343,56 +340,41 @@ if ( p.sack_freq || p.sack_timeout )
 unistd::bind( sock, addr );
 unistd::listen( sock, 128 );
 subscribe_events( sock );
+unistd::epoll_add( efd, sock, EPOLLIN, static_cast<int>( sock ) );
 
-void* shared_buf = ::mmap( nullptr, sizeof(counters), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, 0, 0 );
+unistd::fd timerfd = std::move( timerfd_create( CLOCK_MONOTONIC, TFD_NONBLOCK ) );
+itimerspec timeout{ { 1, 0 }, { 1, 0 } };
+timerfd_settime( timerfd, 0, &timeout, nullptr );
+unistd::epoll_add( efd, timerfd, EPOLLET | EPOLLIN, static_cast<int>( timerfd ) );
 
-g_counters.reset( new( shared_buf ) counters() );
+receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), p.batch );
 
-bool master = true;
 for (size_t i = 1; i < p.workers; ++i)
     {
-    if( 0 == fork() )
+    if( 0 == fork( CLONE_FILES | SIGCHLD ) )
         {
-        master = false;
+        g_worker_id = i;
         break;
         }
     }
 
-unistd::fd efd = std::move( unistd::epoll_create() );
-unistd::epoll_add( efd, sock, EPOLLIN, static_cast<int>( sock ) );
-
-unistd::fd timerfd;
-if ( master )
-    {
-    timerfd = std::move( timerfd_create( CLOCK_MONOTONIC, TFD_NONBLOCK ) );
-    itimerspec timeout{ { 1, 0 }, { 1, 0 } };
-    timerfd_settime( timerfd, 0, &timeout, nullptr );
-    unistd::epoll_add( efd, timerfd, EPOLLIN, static_cast<int>( timerfd ) );
-    }
-
-receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), p.batch );
-
+//EPOLLONESHOT
 const unistd::timespec minimal_sleep_time( 0, 1000L ); //1mcs
 const unistd::timespec start_time = unistd::clock_gettime( CLOCK_MONOTONIC );
 for (uint64_t i = 1;; ++i)
     {
     ++g_counters->loops;
-    const std::vector<epoll_event> events = unistd::epoll_wait( efd, 4/*maxevents*/, -1/*timeout*/ );
+    const std::vector<epoll_event> events = unistd::epoll_wait( efd, 1/*maxevents*/, -1/*timeout*/ );
     for (const auto& event : events)
         {
         if ( event.data.fd == sock )
             {
             if ( event.events & EPOLLIN )
                 {
-                for (size_t boost_i = 0; boost_i < p.boost; ++boost_i)
-                    {
-                    ++g_counters->recv_calls;
-                    const receiver::result messages = rcv.recv( sock );
-                    g_counters->recv_messages += messages.size();
-                    process_messages( messages );
-                    if ( messages.size() < p.batch )
-                        break;
-                    }
+                ++g_counters->recv_calls;
+                const receiver::result messages = rcv.recv( sock );
+                g_counters->recv_messages += messages.size();
+                process_messages( messages );
                 }
             }
         else if ( event.data.fd == timerfd )
