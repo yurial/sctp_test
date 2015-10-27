@@ -31,6 +31,7 @@ int help(FILE* os, int argc, char* argv[])
     fprintf( os, "  --nodelay       disable Nagle algorithm\n" );
     fprintf( os, "  --sndbuf[k|m|g] send buffer\n" );
     fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
+    fprintf( os, "  --msgsize       message size\n" );
     return EXIT_SUCCESS;
     }
 
@@ -47,6 +48,7 @@ struct opt
         sndbuf,
         rcvbuf,
         max_burst,
+        msgsize
         };
     };
 
@@ -59,6 +61,7 @@ static const option long_options[] =
     { "sndbuf",     required_argument,  nullptr, opt::sndbuf    },
     { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    },
     { "max-burst",  required_argument,  nullptr, opt::max_burst },
+    { "msgsize",    required_argument,  nullptr, opt::msgsize   },
     { nullptr,      no_argument,        nullptr, 0              }
     };
 
@@ -72,6 +75,7 @@ struct params
     int         sndbuf = 0;
     int         rcvbuf = 0;
     int         max_burst = 0;
+    size_t      msgsize = 8;
     };
 
 params get_params(int argc, char* argv[])
@@ -105,19 +109,9 @@ params get_params(int argc, char* argv[])
             case opt::max_burst:
                 p.max_burst = ext::convert_to<decltype(p.max_burst)>( optarg );
                 break;
-#if 0
-            case opt_file_limit:
-                p.file_limit = ext::convert_to<bytes,std::string>( optarg );
+            case opt::msgsize:
+                p.msgsize = ext::convert_to<bytes,std::string>( optarg );
                 break;
-            case opt_page_size:
-                p.page_size = ext::convert_to<bytes,std::string>( optarg );
-                if ( p.page_size > std::numeric_limits<int32_t>::max() )
-                    {
-                    syslog( LOG_ERR ) << "page size is too big" << std::endl;
-                    exit( EXIT_FAILURE );
-                    }
-                break;
-#endif
             case 0:
                 fprintf( stderr, "Invalid command-line option\n" );
                 help( stderr, argc, argv );
@@ -147,6 +141,14 @@ events.sctp_adaptation_layer_event = 0;
 events.sctp_authentication_event = 0;
 
 unistd::setsockopt( fd, SOL_SCTP, SCTP_EVENTS, &events, sizeof(events) );
+}
+
+std::vector<char> generate_message(size_t size)
+{
+std::vector<char> msg( size );
+for (size_t i = 0; i < msg.size(); ++i)
+    msg[ i ] = 'a' + i % 26;
+return msg;
 }
 
 int main(int argc, char* argv[])
@@ -243,7 +245,7 @@ while ( assoc_id == 0 )
 //int flags = fcntl( sock, F_GETFL, 0 );
 //fcntl( sock, F_SETFL, flags | O_NONBLOCK );
 
-const std::vector<char> msg( { 'p', 'a', 'c', 'k', 'e', 't', '_', 'x' } );
+const std::vector<char> msg = generate_message( p.msgsize );
 struct iovec iov;
 iov.iov_base = const_cast<char*>( msg.data() );
 iov.iov_len = msg.size();

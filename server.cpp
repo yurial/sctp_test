@@ -73,6 +73,7 @@ int help(FILE* os, int argc, char* argv[])
     fprintf( os, "  --sack-timeout  SACK timeout\n" );
     fprintf( os, "  --peeloff       branch off an association into a separate socket\n" );
     fprintf( os, "  --oneshot       use epoll ONESHOT flag to serialize access to socket\n" );
+    fprintf( os, "  --buf-size      buffer size for each message\n" );
     return EXIT_SUCCESS;
     }
 
@@ -92,7 +93,8 @@ struct opt
         sack_freq,
         sack_timeout,
         peeloff,
-        oneshot
+        oneshot,
+        bufsize
         };
     };
 
@@ -109,6 +111,7 @@ static const option long_options[] =
     { "sack-timeout",   required_argument,  nullptr, opt::sack_timeout  },
     { "peeloff",        no_argument,        nullptr, opt::peeloff       },
     { "oneshot",        no_argument,        nullptr, opt::oneshot       },
+    { "bufsize",        required_argument,  nullptr, opt::bufsize       },
     { nullptr,          no_argument,        nullptr, 0                  }
     };
 
@@ -126,6 +129,7 @@ struct params
     uint32_t    sack_timeout = 0;
     bool        peeloff = false;
     bool        oneshot = false;
+    size_t      bufsize = (64*1024);
     };
 
 params g_params;
@@ -175,6 +179,9 @@ params get_params(int argc, char* argv[])
                 break;
             case opt::oneshot:
                 p.oneshot = true;
+                break;
+            case opt::bufsize:
+                p.bufsize = ext::convert_to<bytes,std::string>( optarg );
                 break;
             case 0:
                 fprintf( stderr, "Invalid command-line option\n" );
@@ -380,7 +387,7 @@ itimerspec timeout{ { 1, 0 }, { 1, 0 } };
 timerfd_settime( timerfd, 0, &timeout, nullptr );
 unistd::epoll_add( efd, timerfd, EPOLLONESHOT | EPOLLIN, static_cast<int>( timerfd ) );
 
-receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), g_params.batch );
+receiver rcv( g_params.bufsize, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), g_params.batch );
 
 for (size_t i = 1; i < g_params.workers; ++i)
     {
