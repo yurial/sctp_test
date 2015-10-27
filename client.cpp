@@ -31,6 +31,7 @@ int help(FILE* os, int argc, char* argv[])
     fprintf( os, "  --nodelay           disable Nagle algorithm\n" );
     fprintf( os, "  --sndbuf[k|m|g]     send buffer\n" );
     fprintf( os, "  --rcvbuf[k|m|g]     recv buffer\n" );
+    fprintf( os, "  --mtu[k|m|g]        set MTU (ipv6 only)\n" );
     fprintf( os, "  --maxseg            (SCTP_MAXSEG) max packet size\n" );
     fprintf( os, "  --msgsize[k|m|g]    message size\n" );
     return EXIT_SUCCESS;
@@ -49,6 +50,7 @@ struct opt
         sndbuf,
         rcvbuf,
         max_burst,
+        mtu,
         maxseg,
         msgsize
         };
@@ -63,6 +65,7 @@ static const option long_options[] =
     { "sndbuf",     required_argument,  nullptr, opt::sndbuf    },
     { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    },
     { "max-burst",  required_argument,  nullptr, opt::max_burst },
+    { "mtu",        required_argument,  nullptr, opt::mtu       },
     { "maxseg",     required_argument,  nullptr, opt::maxseg    },
     { "msgsize",    required_argument,  nullptr, opt::msgsize   },
     { nullptr,      no_argument,        nullptr, 0              }
@@ -78,6 +81,7 @@ struct params
     int         sndbuf = 0;
     int         rcvbuf = 0;
     int         max_burst = 0;
+    int         mtu = 0;
     int         maxseg = 0;
     size_t      msgsize = 8;
     };
@@ -112,6 +116,9 @@ params get_params(int argc, char* argv[])
                 break;
             case opt::max_burst:
                 p.max_burst = ext::convert_to<decltype(p.max_burst)>( optarg );
+                break;
+            case opt::mtu:
+                p.mtu = ext::convert_to<bytes,std::string>( optarg );
                 break;
             case opt::maxseg:
                 p.maxseg = ext::convert_to<bytes,std::string>( optarg );
@@ -170,6 +177,9 @@ subscribe_events( sock );
 
 if ( 0 != p.sndbuf )
     unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, p.sndbuf );
+
+if ( 0 != p.mtu )
+    unistd::setsockopt( sock, IPPROTO_IPV6, IPV6_MTU, p.mtu );
 
 if ( p.nodelay )
     unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
