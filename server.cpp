@@ -396,9 +396,9 @@ for (uint64_t i = 1;; ++i)
             {
             ++g_counters->recv_calls;
             int fd = event.data.fd;
-            fprintf( stderr, "worker_id: %zu recv msg from %d\n", g_worker_id, fd );
+            //fprintf( stderr, "worker_id: %zu recv msg from %d\n", g_worker_id, fd );
             const receiver::result messages = rcv.recv( fd );
-            fprintf( stderr, "worker_id: %zu recv %zu msg from %d\n", g_worker_id, messages.size(), fd );
+            //fprintf( stderr, "worker_id: %zu recv %zu msg from %d\n", g_worker_id, messages.size(), fd );
             if ( p.peeloff )
                 unistd::epoll_mod( efd, fd, EPOLLONESHOT | EPOLLIN, fd );
             g_counters->recv_messages += messages.size();
