@@ -124,6 +124,8 @@ struct params
     bool        peeloff = false;
     };
 
+params g_params;
+
 params get_params(int argc, char* argv[])
     {
     params p;
@@ -327,30 +329,30 @@ signal( SIGTRAP, SIG_IGN );
 void* shared_buf = ::mmap( nullptr, sizeof(counters), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, 0, 0 );
 g_counters.reset( new( shared_buf ) counters() );
 
-params p = get_params( argc, argv );
+g_params = get_params( argc, argv );
 
 unistd::fd efd = std::move( unistd::epoll_create() );
 
 unistd::addrinfo hint = addrinfo{ AI_PASSIVE, AF_INET6, SOCK_SEQPACKET, IPPROTO_SCTP, 0, nullptr, nullptr, nullptr };
-std::vector<unistd::addrinfo> addrs = unistd::getaddrinfo( p.hostname, p.port, hint );
+std::vector<unistd::addrinfo> addrs = unistd::getaddrinfo( g_params.hostname, g_params.port, hint );
 const unistd::addrinfo& addr = addrs.at( 0 );
 unistd::fd sock = unistd::socket( addr );
 
 int flags = fcntl( sock, F_GETFL, 0 );
 fcntl( sock, F_SETFL, flags | O_NONBLOCK );
 
-if ( 0 != p.sndbuf )
-    unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, p.sndbuf );
+if ( 0 != g_params.sndbuf )
+    unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, g_params.sndbuf );
 
-if ( 0 != p.rcvbuf )
-    unistd::setsockopt( sock, SOL_SOCKET, SO_RCVBUF, p.rcvbuf );
+if ( 0 != g_params.rcvbuf )
+    unistd::setsockopt( sock, SOL_SOCKET, SO_RCVBUF, g_params.rcvbuf );
 
-if ( p.nodelay )
+if ( g_params.nodelay )
     unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
 
-if ( p.sack_freq || p.sack_timeout )
+if ( g_params.sack_freq || g_params.sack_timeout )
     {
-    const struct sctp_sack_info sack_info{ 0, p.sack_timeout, p.sack_freq };
+    const struct sctp_sack_info sack_info{ 0, g_params.sack_timeout, g_params.sack_freq };
     unistd::setsockopt( sock, SOL_SCTP, SCTP_DELAYED_SACK, sack_info );
     }
 
@@ -358,16 +360,16 @@ if ( p.sack_freq || p.sack_timeout )
 unistd::bind( sock, addr );
 unistd::listen( sock, 128 );
 subscribe_events( sock );
-unistd::epoll_add( efd, sock, p.peeloff? EPOLLONESHOT | EPOLLIN : EPOLLIN, static_cast<int>( sock ) );
+unistd::epoll_add( efd, sock, g_params.peeloff? EPOLLONESHOT | EPOLLIN : EPOLLIN, static_cast<int>( sock ) );
 
 unistd::fd timerfd = std::move( timerfd_create( CLOCK_MONOTONIC, TFD_NONBLOCK ) );
 itimerspec timeout{ { 1, 0 }, { 1, 0 } };
 timerfd_settime( timerfd, 0, &timeout, nullptr );
 unistd::epoll_add( efd, timerfd, EPOLLONESHOT | EPOLLIN, static_cast<int>( timerfd ) );
 
-receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), p.batch );
+receiver rcv( 8192, 1, CMSG_SPACE( sizeof( sctp_sndrcvinfo ) ), g_params.batch );
 
-for (size_t i = 1; i < p.workers; ++i)
+for (size_t i = 1; i < g_params.workers; ++i)
     {
     if( 0 == fork( CLONE_FILES | SIGCHLD ) )
         {
@@ -399,17 +401,17 @@ for (uint64_t i = 1;; ++i)
             //fprintf( stderr, "worker_id: %zu recv msg from %d\n", g_worker_id, fd );
             const receiver::result messages = rcv.recv( fd );
             //fprintf( stderr, "worker_id: %zu recv %zu msg from %d\n", g_worker_id, messages.size(), fd );
-            if ( p.peeloff )
+            if ( g_params.peeloff )
                 unistd::epoll_mod( efd, fd, EPOLLONESHOT | EPOLLIN, fd );
             g_counters->recv_messages += messages.size();
-            process_messages( efd, sock, p.peeloff, messages );
+            process_messages( efd, sock, g_params.peeloff, messages );
             }
         }
 
     ++g_counters->loops;
-    if ( p.loops )
+    if ( g_params.loops )
         {
-        const uint64_t estimated_shift = static_cast<double>( i ) * 1000000000.0 / static_cast<double>( p.loops );
+        const uint64_t estimated_shift = static_cast<double>( i ) * 1000000000.0 / static_cast<double>( g_params.loops );
         const unistd::timespec estimated_end = start_time + unistd::timespec( estimated_shift / 1000000000L, estimated_shift % 1000000000L );
         const unistd::timespec end_time = unistd::clock_gettime( CLOCK_MONOTONIC );
         const unistd::timespec sleep_time = estimated_end - end_time;
@@ -419,7 +421,7 @@ for (uint64_t i = 1;; ++i)
             {
             //fix 'i'
             const unistd::timespec elapse_time = end_time - start_time;
-            i = (static_cast<double>(elapse_time.tv_sec) + static_cast<double>(elapse_time.tv_nsec) / 1000000000.0) * static_cast<double>( p.loops );
+            i = (static_cast<double>(elapse_time.tv_sec) + static_cast<double>(elapse_time.tv_nsec) / 1000000000.0) * static_cast<double>( g_params.loops );
             }
         }
     }
