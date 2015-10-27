@@ -25,13 +25,14 @@ assoc_params.sasoc_cookie_life
 int help(FILE* os, int argc, char* argv[])
     {
     fprintf( os, "usage: %s [-h] [-n <count>] [hostname] [port]\n", argv[0] );
-    fprintf( os, "  --help          help :)\n" );
-    fprintf( os, "  --count         count of messages\n" );
-    fprintf( os, "  --batch         count of messages per sendmmsg\n" );
-    fprintf( os, "  --nodelay       disable Nagle algorithm\n" );
-    fprintf( os, "  --sndbuf[k|m|g] send buffer\n" );
-    fprintf( os, "  --rcvbuf[k|m|g] recv buffer\n" );
-    fprintf( os, "  --msgsize       message size\n" );
+    fprintf( os, "  --help              help :)\n" );
+    fprintf( os, "  --count             count of messages\n" );
+    fprintf( os, "  --batch             count of messages per sendmmsg\n" );
+    fprintf( os, "  --nodelay           disable Nagle algorithm\n" );
+    fprintf( os, "  --sndbuf[k|m|g]     send buffer\n" );
+    fprintf( os, "  --rcvbuf[k|m|g]     recv buffer\n" );
+    fprintf( os, "  --maxseg            (SCTP_MAXSEG) max packet size\n" );
+    fprintf( os, "  --msgsize[k|m|g]    message size\n" );
     return EXIT_SUCCESS;
     }
 
@@ -48,6 +49,7 @@ struct opt
         sndbuf,
         rcvbuf,
         max_burst,
+        maxseg,
         msgsize
         };
     };
@@ -61,6 +63,7 @@ static const option long_options[] =
     { "sndbuf",     required_argument,  nullptr, opt::sndbuf    },
     { "rcvbuf",     required_argument,  nullptr, opt::rcvbuf    },
     { "max-burst",  required_argument,  nullptr, opt::max_burst },
+    { "maxseg",     required_argument,  nullptr, opt::maxseg    },
     { "msgsize",    required_argument,  nullptr, opt::msgsize   },
     { nullptr,      no_argument,        nullptr, 0              }
     };
@@ -75,6 +78,7 @@ struct params
     int         sndbuf = 0;
     int         rcvbuf = 0;
     int         max_burst = 0;
+    int         maxseg = 0;
     size_t      msgsize = 8;
     };
 
@@ -108,6 +112,9 @@ params get_params(int argc, char* argv[])
                 break;
             case opt::max_burst:
                 p.max_burst = ext::convert_to<decltype(p.max_burst)>( optarg );
+                break;
+            case opt::maxseg:
+                p.maxseg = ext::convert_to<bytes,std::string>( optarg );
                 break;
             case opt::msgsize:
                 p.msgsize = ext::convert_to<bytes,std::string>( optarg );
@@ -161,14 +168,17 @@ const unistd::addrinfo& addr = addrs.at( 0 );
 unistd::fd sock = unistd::socket( addr );
 subscribe_events( sock );
 
+if ( 0 != p.sndbuf )
+    unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, p.sndbuf );
+
 if ( p.nodelay )
     unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
 
 if ( 0 != p.max_burst )
     unistd::setsockopt( sock, SOL_SCTP, SCTP_MAX_BURST, p.max_burst );
 
-if ( 0 != p.sndbuf )
-    unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, p.sndbuf );
+if ( 0 != p.maxseg )
+    unistd::setsockopt( sock, SOL_SCTP, SCTP_MAXSEG, p.maxseg );
 
 int sndbuf = 0;
 socklen_t len = sizeof(sndbuf);
