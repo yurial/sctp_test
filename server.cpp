@@ -72,6 +72,7 @@ int help(FILE* os, int argc, char* argv[])
     fprintf( os, "  --sack-freq     SACK frequency\n" );
     fprintf( os, "  --sack-timeout  SACK timeout\n" );
     fprintf( os, "  --peeloff       branch off an association into a separate socket\n" );
+    fprintf( os, "  --oneshot       use epoll ONESHOT flag to serialize access to socket\n" );
     return EXIT_SUCCESS;
     }
 
@@ -90,7 +91,8 @@ struct opt
         batch,
         sack_freq,
         sack_timeout,
-        peeloff
+        peeloff,
+        oneshot
         };
     };
 
@@ -106,6 +108,7 @@ static const option long_options[] =
     { "sack-freq",      required_argument,  nullptr, opt::sack_freq     },
     { "sack-timeout",   required_argument,  nullptr, opt::sack_timeout  },
     { "peeloff",        no_argument,        nullptr, opt::peeloff       },
+    { "oneshot",        no_argument,        nullptr, opt::oneshot       },
     { nullptr,          no_argument,        nullptr, 0                  }
     };
 
@@ -122,6 +125,7 @@ struct params
     uint32_t    sack_freq = 0;
     uint32_t    sack_timeout = 0;
     bool        peeloff = false;
+    bool        oneshot = false;
     };
 
 params g_params;
@@ -169,6 +173,9 @@ params get_params(int argc, char* argv[])
             case opt::peeloff:
                 p.peeloff = true;
                 break;
+            case opt::oneshot:
+                p.oneshot = true;
+                break;
             case 0:
                 fprintf( stderr, "Invalid command-line option\n" );
                 help( stderr, argc, argv );
@@ -200,7 +207,12 @@ events.sctp_authentication_event = 1;
 unistd::setsockopt( fd, IPPROTO_SCTP, SCTP_EVENTS, &events, sizeof(events) );
 }
 
-void notification_handle(int efd, int sock, bool peeloff, const sctp_notification& notify)
+int get_epoll_flags()
+    {
+    return g_params.oneshot? EPOLLONESHOT | EPOLLIN : EPOLLIN;
+    }
+
+void notification_handle(int efd, int sock, const sctp_notification& notify)
 {
 switch ( notify.sn_header.sn_type )
     {
@@ -208,14 +220,15 @@ switch ( notify.sn_header.sn_type )
         {
         const auto& sac = notify.sn_assoc_change;
 std::cout << "^^^ assoc_change: state=" << ext::convert_to<std::string>( static_cast<sctp_sac_state>( sac.sac_state ) ) << " assoc_id=" << sac.sac_assoc_id << " error=" << sac.sac_error << " in=" << sac.sac_inbound_streams << " out=" << sac.sac_outbound_streams << std::endl;
-        if ( peeloff )
+        if ( g_params.peeloff )
             {
             switch ( sac.sac_state )
                 {
                 case SCTP_COMM_UP:
                     {
                     int fd = sctp_peeloff( sock, sac.sac_assoc_id );
-                    unistd::epoll_add( efd, fd, EPOLLONESHOT | EPOLLIN, fd );
+                    if ( -1 != fd )
+                        unistd::epoll_add( efd, fd, get_epoll_flags(), fd );
                     break;
                     }
                 case SCTP_SHUTDOWN_COMP:
@@ -271,7 +284,7 @@ std::cout << "^^^ assoc_change: state=" << ext::convert_to<std::string>( static_
     };
 }
 
-void process_message(int efd, int sock, bool peeloff, const mmsghdr& message)
+void process_message(int efd, int sock, const mmsghdr& message)
 {
 const msghdr& hdr = message.msg_hdr;
 size_t nrecv = message.msg_len;
@@ -298,15 +311,15 @@ for (cmsghdr* cmsg = CMSG_FIRSTHDR( &hdr ); cmsg != nullptr; cmsg = CMSG_NXTHDR(
         } //if
     } //for
 if ( hdr.msg_flags & MSG_NOTIFICATION )
-    notification_handle( efd, sock, peeloff, *reinterpret_cast<sctp_notification*>( hdr.msg_iov[0].iov_base ) );
+    notification_handle( efd, sock, *reinterpret_cast<sctp_notification*>( hdr.msg_iov[0].iov_base ) );
 else
     ++g_counters->recv_requests;
 }
 
-void process_messages(int efd, int sock, bool peeloff, const receiver::result& messages)
+void process_messages(int efd, int sock, const receiver::result& messages)
 {
 for (const auto& message : messages)
-    process_message( efd, sock, peeloff, message );
+    process_message( efd, sock, message );
 }
 
 void show_stat()
@@ -360,7 +373,7 @@ if ( g_params.sack_freq || g_params.sack_timeout )
 unistd::bind( sock, addr );
 unistd::listen( sock, 128 );
 subscribe_events( sock );
-unistd::epoll_add( efd, sock, g_params.peeloff? EPOLLONESHOT | EPOLLIN : EPOLLIN, static_cast<int>( sock ) );
+unistd::epoll_add( efd, sock, get_epoll_flags(), static_cast<int>( sock ) );
 
 unistd::fd timerfd = std::move( timerfd_create( CLOCK_MONOTONIC, TFD_NONBLOCK ) );
 itimerspec timeout{ { 1, 0 }, { 1, 0 } };
@@ -401,10 +414,10 @@ for (uint64_t i = 1;; ++i)
             //fprintf( stderr, "worker_id: %zu recv msg from %d\n", g_worker_id, fd );
             const receiver::result messages = rcv.recv( fd );
             //fprintf( stderr, "worker_id: %zu recv %zu msg from %d\n", g_worker_id, messages.size(), fd );
-            if ( g_params.peeloff )
-                unistd::epoll_mod( efd, fd, EPOLLONESHOT | EPOLLIN, fd );
+            if ( g_params.oneshot )
+                unistd::epoll_mod( efd, fd, get_epoll_flags(), fd );
             g_counters->recv_messages += messages.size();
-            process_messages( efd, sock, g_params.peeloff, messages );
+            process_messages( efd, sock, messages );
             }
         }
 
