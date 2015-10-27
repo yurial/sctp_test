@@ -9,7 +9,7 @@ else
 endif
 
 CPPFLAGS+=$(INCLUDE) $(COMMON_CPPFLAGS)
-LDFLAGS+=
+LDFLAGS+=-flto
 LOADLIBES+=-lsctp
 
 ALL:=client server
