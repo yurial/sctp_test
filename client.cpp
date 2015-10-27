@@ -179,7 +179,10 @@ if ( 0 != p.sndbuf )
     unistd::setsockopt( sock, SOL_SOCKET, SO_SNDBUF, p.sndbuf );
 
 if ( 0 != p.mtu )
+    {
+    unistd::setsockopt( sock, IPPROTO_IPV6, IPV6_MTU_DISCOVER, IP_PMTUDISC_DONT );
     unistd::setsockopt( sock, IPPROTO_IPV6, IPV6_MTU, p.mtu );
+    }
 
 if ( p.nodelay )
     unistd::setsockopt( sock, SOL_SCTP, SCTP_NODELAY, 1 );
